@@ -211,7 +211,8 @@ class TelegramChannel extends NotificationChannel {
                 messageText += `\n`;
             }
 
-            messageText += `💬 *Reply with 1, 2, or 3 to respond*\n`;
+            const optionNums = options.map((_, i) => i + 1).join(', ');
+            messageText += `💬 *Reply with ${optionNums} to respond*\n`;
             messageText += `Or type: \`/cmd ${token} y\``;
         } else if (notification.metadata) {
             const maxTotal = 3800;

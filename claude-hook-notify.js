@@ -169,16 +169,17 @@ async function sendHookNotification() {
             }
 
             // Build approval options from permission_suggestions
+            // CLI shows one "don't ask again" option per suggestion (not per rule),
+            // so we must match that to keep reply numbers aligned with CLI numbering.
             const approvalOptions = ['Yes'];
             if (hookData.permission_suggestions && Array.isArray(hookData.permission_suggestions)) {
                 for (const suggestion of hookData.permission_suggestions) {
                     if (suggestion.type === 'addRules' && Array.isArray(suggestion.rules)) {
-                        for (const rule of suggestion.rules) {
-                            const toolName = rule.toolName || '';
-                            const ruleContent = rule.ruleContent || '';
-                            if (toolName && ruleContent) {
-                                approvalOptions.push(`Yes, and don't ask again for: ${toolName}(${ruleContent}:*)`);
-                            }
+                        const parts = suggestion.rules
+                            .filter(r => r.toolName && r.ruleContent)
+                            .map(r => `${r.toolName}(${r.ruleContent}:*)`);
+                        if (parts.length > 0) {
+                            approvalOptions.push(`Yes, and don't ask again for: ${parts.join(', ')}`);
                         }
                     }
                 }
