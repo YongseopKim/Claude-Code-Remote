@@ -13,7 +13,8 @@
     "relay:start": "INJECTION_MODE=pty node src/relay/relay-pty.js",
     "telegram": "node start-telegram-webhook.js",
     "line": "node start-line-webhook.js",
-    "webhooks": "node start-all-webhooks.js"
+    "webhooks": "node start-all-webhooks.js",
+    "test": "jest"
   },
   "keywords": [
     "claude-code",
@@ -69,5 +70,8 @@
     "README.md",
     "QUICKSTART.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "jest": "^30.2.0"
+  }
 }
