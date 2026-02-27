@@ -186,8 +186,13 @@ class TelegramChannel extends NotificationChannel {
         const type = notification.type;
         const emojiMap = { completed: '✅', waiting: '⏳', permission: '🔐' };
         const statusMap = { completed: 'Completed', waiting: 'Waiting for Input', permission: 'Permission Required' };
-        const emoji = emojiMap[type] || '📢';
-        const status = statusMap[type] || type;
+        let emoji = emojiMap[type] || '📢';
+        let status = statusMap[type] || type;
+
+        if (type === 'permission' && notification.metadata?.isUserQuestion) {
+            emoji = '❓';
+            status = 'Question';
+        }
 
         let messageText = `${emoji} *Claude ${status}*\n`;
         messageText += `*Project:* ${this._escapeMd(notification.project)}\n`;
@@ -196,7 +201,24 @@ class TelegramChannel extends NotificationChannel {
         messageText += `*Session:* ${this._escapeMd(displaySession)}\n`;
         messageText += `*Token:* \`${token}\`\n\n`;
 
-        if (type === 'permission' && notification.metadata?.permissionMessage) {
+        if (type === 'permission' && notification.metadata?.isUserQuestion) {
+            const escaped = this._escapeMd(notification.metadata.permissionMessage);
+            messageText += `📝 *Question:*\n${escaped}\n\n`;
+
+            const options = notification.metadata.approvalOptions;
+            if (options && options.length > 0) {
+                for (let i = 0; i < options.length; i++) {
+                    const prefix = i === 0 ? '▸' : ' ';
+                    messageText += `${prefix} ${i + 1}\\. ${this._escapeMd(options[i])}\n`;
+                }
+                messageText += `\n`;
+            }
+
+            const optionNums = options.map((_, i) => i + 1).join(', ');
+            const typeOptNum = (notification.metadata.questionOptionCount || 0) + 1;
+            messageText += `💬 *Reply with ${optionNums} to respond*\n`;
+            messageText += `Custom: \`${typeOptNum}. your text here\``;
+        } else if (type === 'permission' && notification.metadata?.permissionMessage) {
             const escaped = this._escapeMd(notification.metadata.permissionMessage);
             messageText += `⚠️ *Permission Request:*\n${escaped}\n\n`;
 
