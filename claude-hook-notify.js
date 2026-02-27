@@ -63,7 +63,7 @@ async function sendHookNotification() {
 
         // Read hook data from stdin (Claude Code passes JSON)
         const hookData = await readStdin();
-        
+
         const channels = [];
         const results = [];
         
@@ -133,11 +133,61 @@ async function sendHookNotification() {
             project: projectName,
             tmuxSession: tmuxSession
         };
-        // For permission type, attach the hook message directly as metadata
-        // so TelegramChannel doesn't try to scrape tmux for it
-        if (notificationType === 'permission' && hookData.message) {
+        // For permission type, build a detailed permission description
+        if (notificationType === 'permission') {
+            let permissionMessage = hookData.message || 'Permission required';
+
+            // If hook provides tool_name and tool_input (from PermissionRequest hook),
+            // build a detailed description including the actual command/arguments
+            if (hookData.tool_name) {
+                const toolName = hookData.tool_name;
+                const toolInput = hookData.tool_input || {};
+                let detail = '';
+
+                if (toolName === 'Bash' && toolInput.command) {
+                    detail = toolInput.command;
+                } else if (toolName === 'Edit' && toolInput.file_path) {
+                    detail = `File: ${toolInput.file_path}`;
+                } else if (toolName === 'Write' && toolInput.file_path) {
+                    detail = `File: ${toolInput.file_path}`;
+                } else if (toolName === 'Read' && toolInput.file_path) {
+                    detail = `File: ${toolInput.file_path}`;
+                } else if (toolInput.command || toolInput.file_path || toolInput.url) {
+                    detail = toolInput.command || toolInput.file_path || toolInput.url;
+                } else {
+                    // Fallback: show first meaningful value from tool_input
+                    const vals = Object.values(toolInput).filter(v => typeof v === 'string' && v.length > 0);
+                    if (vals.length > 0) detail = vals[0];
+                }
+
+                permissionMessage = `Permission to use ${toolName}`;
+                if (detail) {
+                    // Truncate long commands for readability
+                    if (detail.length > 300) detail = detail.substring(0, 297) + '...';
+                    permissionMessage += `\n\n${detail}`;
+                }
+            }
+
+            // Build approval options from permission_suggestions
+            const approvalOptions = ['Yes'];
+            if (hookData.permission_suggestions && Array.isArray(hookData.permission_suggestions)) {
+                for (const suggestion of hookData.permission_suggestions) {
+                    if (suggestion.type === 'addRules' && Array.isArray(suggestion.rules)) {
+                        for (const rule of suggestion.rules) {
+                            const toolName = rule.toolName || '';
+                            const ruleContent = rule.ruleContent || '';
+                            if (toolName && ruleContent) {
+                                approvalOptions.push(`Yes, and don't ask again for: ${toolName}(${ruleContent}:*)`);
+                            }
+                        }
+                    }
+                }
+            }
+            approvalOptions.push('No');
+
             notification.metadata = {
-                permissionMessage: hookData.message,
+                permissionMessage: permissionMessage,
+                approvalOptions: approvalOptions,
                 tmuxSession: tmuxSession
             };
         }

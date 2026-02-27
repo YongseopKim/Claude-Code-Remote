@@ -9,7 +9,7 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const TraceCapture = require('./trace-capture');
-const { extractSessionName } = require('./tmux-utils');
+const { extractSessionName, tmuxExec, tmuxCapture } = require('./tmux-utils');
 
 class TmuxMonitor extends EventEmitter {
     constructor(sessionName = null) {
@@ -115,12 +115,16 @@ class TmuxMonitor extends EventEmitter {
 
     _sessionExists() {
         try {
-            const sessions = execSync('tmux list-sessions -F "#{session_name}"', {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            }).trim().split('\n');
-
-            // list-sessions returns session names only; extract session name from full target
+            const output = tmuxExec(['list-sessions', '-F', '#{session_name}']);
+            if (!output) {
+                // tmuxExec may return '' on snap-tmux; fall back to has-session
+                const { spawnSync } = require('child_process');
+                const r = spawnSync('tmux', ['has-session', '-t', extractSessionName(this.sessionName)], {
+                    stdio: 'ignore', timeout: 3000
+                });
+                return r.status === 0;
+            }
+            const sessions = output.split('\n');
             const sessionOnly = extractSessionName(this.sessionName);
             return sessions.includes(sessionOnly);
         } catch (error) {
@@ -142,13 +146,7 @@ class TmuxMonitor extends EventEmitter {
 
     _captureCurrentContent() {
         try {
-            // Capture current pane content
-            const content = execSync(`tmux capture-pane -t ${this.sessionName} -p`, {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            });
-            
-            return content;
+            return tmuxCapture(this.sessionName, 50);
         } catch (error) {
             console.error('Error capturing tmux content:', error.message);
             return '';
@@ -305,43 +303,39 @@ class TmuxMonitor extends EventEmitter {
 
     _extractRecentConversation() {
         // Extract recent conversation from buffer
-        const recentBuffer = this.outputBuffer.slice(-50); // Last 50 lines
+        const recentBuffer = this.outputBuffer.slice(-50);
         const text = recentBuffer.join('\n');
-        
-        // Try to identify user question and Claude response using Claude Code patterns
+
         let userQuestion = '';
         let claudeResponse = '';
-        
-        // Look for Claude Code specific patterns
+
         const lines = recentBuffer;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            
-            // Look for user input (after > prompt)
-            if (line.startsWith('> ') && line.length > 2) {
-                userQuestion = line.substring(2).trim();
+
+            // Look for user input ("> " or "❯ ")
+            if (this._isUserInput(line)) {
+                userQuestion = this._getUserText(line);
                 continue;
             }
-            
-            // Look for Claude response (⏺ prefix)
-            if (line.startsWith('⏺ ') && line.length > 2) {
-                claudeResponse = line.substring(2).trim();
-                break;
+
+            // Look for Claude text response (not tool calls)
+            if (this._isClaudeTextResponse(line)) {
+                claudeResponse = this._getResponseText(line);
             }
         }
-        
-        // If we didn't find the specific format, use fallback
+
+        // Fallback: if we didn't find specific format, use heuristic
         if (!userQuestion || !claudeResponse) {
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
-                
-                // Skip system lines
-                if (!line || line.startsWith('[') || line.startsWith('$') || 
+
+                if (!line || line.startsWith('[') || line.startsWith('$') ||
                     line.startsWith('#') || line.includes('? for shortcuts') ||
                     line.match(/^[╭╰│─]+$/)) {
                     continue;
                 }
-                
+
                 if (!userQuestion && line.length > 2) {
                     userQuestion = line;
                 } else if (userQuestion && !claudeResponse && line.length > 5 && line !== userQuestion) {
@@ -350,8 +344,7 @@ class TmuxMonitor extends EventEmitter {
                 }
             }
         }
-        
-        // Clean terminal UI chrome from response
+
         claudeResponse = this._cleanResponseContent(claudeResponse);
 
         return {
@@ -441,12 +434,7 @@ class TmuxMonitor extends EventEmitter {
      */
     getFromTmuxBuffer(sessionName, lines = 200) {
         try {
-            // Capture the pane contents
-            const buffer = execSync(`tmux capture-pane -t ${sessionName} -p -S -${lines}`, {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            });
-
+            const buffer = tmuxCapture(sessionName, lines);
             return this.extractConversation(buffer, sessionName);
         } catch (error) {
             console.error(`Failed to get tmux buffer for session ${sessionName}:`, error.message);
@@ -491,12 +479,11 @@ class TmuxMonitor extends EventEmitter {
     _filterByTimestamp(content, timestamp) {
         const lines = content.split('\n');
         let lastUserInputIndex = -1;
-        
-        // Find the LAST occurrence of user input (line starting with "> ")
+
+        // Find the LAST occurrence of user input ("> " or "❯ ")
         for (let i = lines.length - 1; i >= 0; i--) {
             const line = lines[i];
-            // Check for user input pattern: "> " at the start of the line
-            if (line.startsWith('> ') && line.length > 2) {
+            if ((line.startsWith('> ') || line.startsWith('❯ ')) && line.length > 2) {
                 lastUserInputIndex = i;
                 break;
             }
@@ -524,9 +511,10 @@ class TmuxMonitor extends EventEmitter {
         let skipNextEmptyLine = false;
         let lastClaudeResponseStart = -1;
         
-        // Find where the last Claude response starts
+        // Find where the last Claude response starts ("⏺ " or "● " text, not tool)
         for (let i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].startsWith('⏺ ')) {
+            if (lines[i].startsWith('⏺ ') ||
+                (lines[i].startsWith('● ') && !this._isToolCallLine(lines[i].trim()))) {
                 lastClaudeResponseStart = i;
                 break;
             }
@@ -541,17 +529,17 @@ class TmuxMonitor extends EventEmitter {
                 break;
             }
             
-            // Start of user input
-            if (line.startsWith('> ')) {
+            // Start of user input ("> " or "❯ ")
+            if (line.startsWith('> ') || line.startsWith('❯ ')) {
                 inUserInput = true;
                 skipNextEmptyLine = true;
                 continue;
             }
-            
+
             // Still in user input (continuation lines)
             if (inUserInput) {
                 // Check if we've reached the end of user input
-                if (line.trim() === '' || line.startsWith('⏺')) {
+                if (line.trim() === '' || line.startsWith('⏺') || line.startsWith('●')) {
                     inUserInput = false;
                     if (skipNextEmptyLine && line.trim() === '') {
                         skipNextEmptyLine = false;
@@ -593,13 +581,7 @@ class TmuxMonitor extends EventEmitter {
      */
     getFullTraceFromTmuxBuffer(sessionName, lines = 1000) {
         try {
-            // Capture the pane contents
-            const buffer = execSync(`tmux capture-pane -t ${sessionName} -p -S -${lines}`, {
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            });
-
-            return buffer;
+            return tmuxCapture(sessionName, lines);
         } catch (error) {
             console.error(`Failed to get tmux buffer for session ${sessionName}:`, error.message);
             return '';
@@ -612,9 +594,65 @@ class TmuxMonitor extends EventEmitter {
      * @param {string} sessionName - The tmux session name (optional)
      * @returns {Object} - { userQuestion, claudeResponse }
      */
+    /**
+     * Check if a line is a user input prompt.
+     * Handles both old format ("> ") and new format ("❯ ").
+     */
+    _isUserInput(line) {
+        return (line.startsWith('> ') || line.startsWith('❯ ')) && line.length > 2;
+    }
+
+    /**
+     * Extract user text from a prompt line (strip the prompt character).
+     */
+    _getUserText(line) {
+        if (line.startsWith('> ')) return line.substring(2).trim();
+        if (line.startsWith('❯ ')) return line.substring(2).trim();
+        return line.trim();
+    }
+
+    /**
+     * Check if a line is a Claude text response (not a tool call).
+     * Handles both old format ("⏺ ") and new format ("● ").
+     * Tool calls like "● Bash(...)" or "● Read ..." are excluded.
+     */
+    _isClaudeTextResponse(line) {
+        // Old format
+        if (line.startsWith('⏺ ') && line.length > 2) return true;
+        // New format — exclude tool call patterns
+        if (line.startsWith('● ') && line.length > 2) {
+            return !this._isToolCallLine(line);
+        }
+        return false;
+    }
+
+    /**
+     * Check if a "● " line is a tool call (not a text response).
+     */
+    _isToolCallLine(line) {
+        // Known tool names used by Claude Code
+        return /^● (Bash|Read|Write|Edit|Glob|Grep|Task|WebFetch|WebSearch|Searched|Background|Skill|NotebookEdit)\b/.test(line);
+    }
+
+    /**
+     * Check if a line starts a Claude response block (text or tool).
+     */
+    _isClaudeResponseStart(line) {
+        return line.startsWith('⏺') || line.startsWith('●');
+    }
+
+    /**
+     * Strip the response prefix character from a line.
+     */
+    _getResponseText(line) {
+        if (line.startsWith('⏺ ')) return line.substring(2).trim();
+        if (line.startsWith('● ')) return line.substring(2).trim();
+        return line.trim();
+    }
+
     extractConversation(text, sessionName = null) {
         const lines = text.split('\n');
-        
+
         let userQuestion = '';
         let claudeResponse = '';
         let responseLines = [];
@@ -623,53 +661,48 @@ class TmuxMonitor extends EventEmitter {
         // Find the most recent user question and Claude response
         let inUserInput = false;
         let userQuestionLines = [];
-        
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            
-            // Detect user input (line starting with "> " followed by content)
-            if (line.startsWith('> ') && line.length > 2) {
-                userQuestionLines = [line.substring(2).trim()];
+
+            // Detect user input ("> " or "❯ " followed by content)
+            if (this._isUserInput(line)) {
+                userQuestionLines = [this._getUserText(line)];
                 inUserInput = true;
-                inResponse = false; // Reset response capture
-                responseLines = []; // Clear previous response
-                
-                // Record user input timestamp if session name provided
+                inResponse = false;
+                responseLines = [];
+
                 if (sessionName) {
                     this.traceCapture.recordUserInput(sessionName);
                 }
-                
                 continue;
             }
-            
+
             // Continue capturing multi-line user input
-            if (inUserInput && !line.startsWith('⏺') && line.length > 0) {
+            if (inUserInput && !this._isClaudeResponseStart(line) && line.length > 0) {
                 userQuestionLines.push(line);
                 continue;
             }
-            
+
             // End of user input
-            if (inUserInput && (line.startsWith('⏺') || line.length === 0)) {
+            if (inUserInput && (this._isClaudeResponseStart(line) || line.length === 0)) {
                 inUserInput = false;
                 userQuestion = userQuestionLines.join(' ');
             }
-            
-            // Detect Claude response (line starting with "⏺ " or other response indicators)
-            if (line.startsWith('⏺ ') || 
-                (inResponse && line.length > 0 && 
+
+            // Detect Claude text response (exclude tool calls)
+            if (this._isClaudeTextResponse(line)) {
+                inResponse = true;
+                responseLines = [this._getResponseText(line)];
+            } else if (inResponse && line.length > 0 &&
                  !line.startsWith('╭') && !line.startsWith('│') && !line.startsWith('╰') &&
-                 !line.startsWith('> ') && !line.includes('? for shortcuts'))) {
-                
-                if (line.startsWith('⏺ ')) {
-                    inResponse = true;
-                    responseLines = [line.substring(2).trim()]; // Remove "⏺ " prefix
-                } else if (inResponse) {
-                    responseLines.push(line);
-                }
-            }
-            
-            // Stop capturing response when we hit another prompt or box boundary
-            if (inResponse && (line.startsWith('╭') || line.startsWith('│ > ') || line.includes('? for shortcuts'))) {
+                 !this._isUserInput(line) && !line.includes('? for shortcuts') &&
+                 !this._isClaudeResponseStart(line)) {
+                // Continue capturing multi-line response
+                responseLines.push(line);
+            } else if (this._isClaudeResponseStart(line) || this._isUserInput(line) ||
+                       line.startsWith('╭') || line.includes('? for shortcuts')) {
+                // Stop capturing response at boundaries
                 inResponse = false;
             }
         }
@@ -677,32 +710,25 @@ class TmuxMonitor extends EventEmitter {
         // Join response lines and clean up
         claudeResponse = responseLines.join('\n').trim();
 
-        // Remove box characters but preserve formatting
         claudeResponse = claudeResponse
             .replace(/[╭╰│]/g, '')
             .replace(/^\s*│\s*/gm, '')
             .trim();
 
-        // Clean up terminal UI chrome from the response
         claudeResponse = this._cleanResponseContent(claudeResponse);
 
-        // Don't limit response length - we want the full response
-        // if (claudeResponse.length > 500) {
-        //     claudeResponse = claudeResponse.substring(0, 497) + '...';
-        // }
-
-        // If we didn't find a question in the standard format, look for any recent text input
+        // If we didn't find a question, search backward for the last user input
         if (!userQuestion) {
             for (let i = lines.length - 1; i >= 0; i--) {
                 const line = lines[i].trim();
-                if (line.startsWith('> ') && line.length > 2) {
-                    userQuestion = line.substring(2).trim();
+                if (this._isUserInput(line)) {
+                    userQuestion = this._getUserText(line);
                     break;
                 }
             }
         }
 
-        return { 
+        return {
             userQuestion: userQuestion || 'No user input',
             claudeResponse: claudeResponse || 'No Claude response'
         };
@@ -724,22 +750,28 @@ class TmuxMonitor extends EventEmitter {
         const removePatterns = [
             // ANSI escape codes (strip from each line, not remove the line)
             // Spinner / loading text (Claude Code animated spinners)
-            /^(Canoodling|Pondering|Thinking|Processing|Analyzing|Searching|Reading|Writing|Editing|Working|Loading|Generating|Compiling|Building|Running|Installing|Fetching|Downloading|Uploading|Connecting|Waiting|Checking|Validating|Verifying|Formatting|Parsing|Resolving|Updating|Scanning|Indexing|Evaluating|Computing|Calculating|Optimizing|Configuring|Initializing|Preparing|Assembling|Collecting|Gathering|Examining|Inspecting|Reviewing|Assessing|Measuring|Monitoring|Observing|Tracking|Recording|Logging)\.{2,}\s*$/i,
+            // Matches both plain "Thinking..." and prefixed "✢ Thinking..." / "· Thinking..."
+            /^[·✱✢✣✤✥✦✧✻✽☆★⚡⏳🔄\s]*(?:Canoodling|Pondering|Thinking|Processing|Analyzing|Searching|Reading|Writing|Editing|Working|Loading|Generating|Compiling|Building|Running|Installing|Fetching|Downloading|Uploading|Connecting|Waiting|Checking|Validating|Verifying|Formatting|Parsing|Resolving|Updating|Scanning|Indexing|Evaluating|Computing|Calculating|Optimizing|Configuring|Initializing|Preparing|Assembling|Collecting|Gathering|Examining|Inspecting|Reviewing|Assessing|Measuring|Monitoring|Observing|Tracking|Recording|Logging|Mustering|Sautéed|Crunched|Cooked|Schlepping|Simmering|Brewing|Whipping|Blending|Marinating|Seasoning|Toasting|Grilling|Roasting|Steaming|Baking|Mixing|Stirring|Kneading|Folding|Chopping|Dicing|Mincing|Slicing|Grating|Peeling|Zesting).*$/i,
             // Status bar / mode indicators
             /^(accept|reject)\s+(edits?\s+on|all)\s*/i,
             /^\s*\?\s+for shortcuts\s*$/i,
+            // Claude Code status line with ⏵⏵
+            /^⏵⏵\s/,
+            // "esc to interrupt" line
+            /^\s*esc to interrupt\s*$/i,
             // Separator lines (all dashes, box-drawing characters)
             /^[─━═╌╍┈┉]+\s*$/,
             /^[\s─━═╌╍┈┉╭╮╰╯│┃┌┐└┘├┤┬┴┼]+\s*$/,
             // Empty box rows
             /^─+\s*$/,
-            // Tool execution markers
-            /^\s*⏺\s*(Read|Edit|Write|Bash|Glob|Grep|Task|WebFetch|WebSearch)\s*$/,
+            // Tool execution markers (both ⏺ and ● formats)
+            /^\s*[⏺●]\s*(Read|Edit|Write|Bash|Glob|Grep|Task|WebFetch|WebSearch|Searched|Background|Skill|NotebookEdit)\b/,
             // Progress indicators
             /^\s*\[\d+\/\d+\]\s*$/,
             /^\s*\d+%\s*$/,
             // Cursor/prompt artifacts
             /^\s*>\s*$/,
+            /^\s*❯\s*$/,
             /^\s*\$\s*$/,
             // Tab/window markers from tmux
             /^\s*\[\d+\]\s*$/,

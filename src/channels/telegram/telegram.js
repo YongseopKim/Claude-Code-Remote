@@ -102,8 +102,10 @@ class TelegramChannel extends NotificationChannel {
         const sessionId = uuidv4();
         const token = this._generateToken();
         
-        // Get current tmux target (session:window.pane) and conversation content
-        const tmuxSession = this._getCurrentTmuxTarget();
+        // Get current tmux target (session:window.pane) and conversation content.
+        // Fall back to notification.tmuxSession when getCurrentTmuxTarget() fails
+        // (e.g. hook subprocesses without tmux client attachment).
+        const tmuxSession = this._getCurrentTmuxTarget() || notification.tmuxSession;
         if (tmuxSession && !notification.metadata) {
             const conversation = this.tmuxMonitor.getRecentConversation(tmuxSession);
             notification.metadata = {
@@ -112,7 +114,7 @@ class TelegramChannel extends NotificationChannel {
                 tmuxSession: tmuxSession
             };
         }
-        
+
         // Ensure tmuxSession is in metadata for session record
         if (notification.tmuxSession && !notification.metadata?.tmuxSession) {
             if (!notification.metadata) notification.metadata = {};
@@ -197,7 +199,19 @@ class TelegramChannel extends NotificationChannel {
         if (type === 'permission' && notification.metadata?.permissionMessage) {
             const escaped = this._escapeMd(notification.metadata.permissionMessage);
             messageText += `⚠️ *Permission Request:*\n${escaped}\n\n`;
-            messageText += `💬 *Reply to this message to respond*\n`;
+
+            // Show approval options if available
+            const options = notification.metadata.approvalOptions;
+            if (options && options.length > 0) {
+                messageText += `*Do you want to proceed?*\n`;
+                for (let i = 0; i < options.length; i++) {
+                    const prefix = i === 0 ? '▸' : ' ';
+                    messageText += `${prefix} ${i + 1}. ${this._escapeMd(options[i])}\n`;
+                }
+                messageText += `\n`;
+            }
+
+            messageText += `💬 *Reply with 1, 2, or 3 to respond*\n`;
             messageText += `Or type: \`/cmd ${token} y\``;
         } else if (notification.metadata) {
             const maxTotal = 3800;
