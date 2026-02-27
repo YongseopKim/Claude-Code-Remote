@@ -120,6 +120,38 @@ class ControllerInjector {
         }
     }
 
+    async injectTwoStep(step1, step2, sessionName = null, delayMs = 500) {
+        const session = sessionName || this.defaultSession;
+
+        if (this.mode !== 'tmux') {
+            this._injectPty(step1, session);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            this._injectPty(step2, session);
+            return true;
+        }
+
+        const tmux = this._getTmuxCommand();
+        const sessionOnly = extractSessionName(session);
+        try {
+            execSync(`${tmux} has-session -t ${sessionOnly}`, { stdio: 'ignore' });
+        } catch (error) {
+            throw new Error(`Tmux session '${sessionOnly}' not found`);
+        }
+
+        const escaped1 = step1.replace(/'/g, "'\\''");
+        execSync(`${tmux} send-keys -t ${session} '${escaped1}'`, { stdio: 'ignore' });
+        execSync(`${tmux} send-keys -t ${session} Enter`, { stdio: 'ignore' });
+
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+
+        const escaped2 = step2.replace(/'/g, "'\\''");
+        execSync(`${tmux} send-keys -t ${session} '${escaped2}'`, { stdio: 'ignore' });
+        execSync(`${tmux} send-keys -t ${session} Enter`, { stdio: 'ignore' });
+
+        this.logger.info(`Two-step command injected to tmux '${session}'`);
+        return true;
+    }
+
     _injectPty(command, sessionName) {
         try {
             // Find PTY session file
