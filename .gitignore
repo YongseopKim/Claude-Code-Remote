@@ -52,5 +52,8 @@ temp/
 src/data/
 !src/data/.gitkeep
 
+# Worktrees
+.worktrees/
+
 # Claude configuration (user-specific)
 CLAUDE.md
