@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
+const { extractSessionName } = require('../../utils/tmux-utils');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -156,13 +157,14 @@ class TelegramWebhookHandler {
         }
 
         try {
-            // Inject command into tmux session
-            const tmuxSession = session.tmuxSession || 'default';
-            await this.injector.injectCommand(command, tmuxSession);
-            
-            // Send confirmation
+            // Inject command into tmux session (full target for precise pane targeting)
+            const tmuxTarget = session.tmuxSession || 'default';
+            await this.injector.injectCommand(command, tmuxTarget);
+
+            // Send confirmation (display session name only for readability)
+            const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
             await this._sendMessage(chatId,
-                `✅ *Command sent successfully*\n\n📝 *Command:* ${this._escapeMd(command)}\n🖥️ *Session:* ${this._escapeMd(tmuxSession)}\n\nClaude is now processing your request...`,
+                `✅ *Command sent successfully*\n\n📝 *Command:* ${this._escapeMd(command)}\n🖥️ *Session:* ${this._escapeMd(displaySession)}\n\nClaude is now processing your request...`,
                 { parse_mode: 'Markdown' });
             
             // Log command execution

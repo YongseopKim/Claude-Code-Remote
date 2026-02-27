@@ -9,6 +9,7 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const TraceCapture = require('./trace-capture');
+const { extractSessionName } = require('./tmux-utils');
 
 class TmuxMonitor extends EventEmitter {
     constructor(sessionName = null) {
@@ -114,12 +115,14 @@ class TmuxMonitor extends EventEmitter {
 
     _sessionExists() {
         try {
-            const sessions = execSync('tmux list-sessions -F "#{session_name}"', { 
+            const sessions = execSync('tmux list-sessions -F "#{session_name}"', {
                 encoding: 'utf8',
                 stdio: ['ignore', 'pipe', 'ignore']
             }).trim().split('\n');
-            
-            return sessions.includes(this.sessionName);
+
+            // list-sessions returns session names only; extract session name from full target
+            const sessionOnly = extractSessionName(this.sessionName);
+            return sessions.includes(sessionOnly);
         } catch (error) {
             return false;
         }

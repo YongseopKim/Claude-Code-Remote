@@ -7,6 +7,7 @@ const { execSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const Logger = require('../core/logger');
+const { extractSessionName } = require('./tmux-utils');
 
 class ControllerInjector {
     constructor(config = {}) {
@@ -95,11 +96,12 @@ class ControllerInjector {
         const tmux = this._getTmuxCommand();
 
         try {
-            // Check if tmux session exists
+            // has-session only accepts session name, not window.pane target
+            const sessionOnly = extractSessionName(sessionName);
             try {
-                execSync(`${tmux} has-session -t ${sessionName}`, { stdio: 'ignore' });
+                execSync(`${tmux} has-session -t ${sessionOnly}`, { stdio: 'ignore' });
             } catch (error) {
-                throw new Error(`Tmux session '${sessionName}' not found`);
+                throw new Error(`Tmux session '${sessionOnly}' not found`);
             }
 
             // Send command to tmux session and execute it

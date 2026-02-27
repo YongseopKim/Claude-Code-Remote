@@ -116,20 +116,9 @@ async function sendHookNotification() {
         const currentDir = process.cwd();
         const projectName = path.basename(currentDir);
         
-        // Try to get current tmux session
-        let tmuxSession = process.env.TMUX_SESSION || 'claude-real';
-        try {
-            const { execSync } = require('child_process');
-            const sessionOutput = execSync('tmux display-message -p "#S"', { 
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            }).trim();
-            if (sessionOutput) {
-                tmuxSession = sessionOutput;
-            }
-        } catch (error) {
-            // Not in tmux or tmux not available, use default
-        }
+        // Try to get current tmux target (session:window.pane)
+        const { getCurrentTmuxTarget } = require('./src/utils/tmux-utils');
+        let tmuxSession = getCurrentTmuxTarget() || process.env.TMUX_SESSION || 'claude-real';
         
         // Create notification based on type
         const titleMap = {
@@ -155,7 +144,7 @@ async function sendHookNotification() {
         // For completed/waiting, don't set metadata - let TelegramChannel extract from tmux
         
         console.log(`📱 Sending ${notificationType} notification for project: ${projectName}`);
-        console.log(`🖥️ Tmux session: ${tmuxSession}`);
+        console.log(`🖥️ Tmux target: ${tmuxSession}`);
         
         // Send notifications to all configured channels
         for (const { name, channel } of channels) {

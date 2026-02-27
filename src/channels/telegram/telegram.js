@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
-const { execSync } = require('child_process');
+const { getCurrentTmuxTarget, extractSessionName } = require('../../utils/tmux-utils');
 
 class TelegramChannel extends NotificationChannel {
     constructor(config = {}) {
@@ -66,19 +66,8 @@ class TelegramChannel extends NotificationChannel {
         return token;
     }
 
-    _getCurrentTmuxSession() {
-        try {
-            // Try to get current tmux session
-            const tmuxSession = execSync('tmux display-message -p "#S"', { 
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore']
-            }).trim();
-            
-            return tmuxSession || null;
-        } catch (error) {
-            // Not in a tmux session or tmux not available
-            return null;
-        }
+    _getCurrentTmuxTarget() {
+        return getCurrentTmuxTarget();
     }
 
     async _getBotUsername() {
@@ -113,8 +102,8 @@ class TelegramChannel extends NotificationChannel {
         const sessionId = uuidv4();
         const token = this._generateToken();
         
-        // Get current tmux session and conversation content
-        const tmuxSession = this._getCurrentTmuxSession();
+        // Get current tmux target (session:window.pane) and conversation content
+        const tmuxSession = this._getCurrentTmuxTarget();
         if (tmuxSession && !notification.metadata) {
             const conversation = this.tmuxMonitor.getRecentConversation(tmuxSession);
             notification.metadata = {
@@ -200,8 +189,9 @@ class TelegramChannel extends NotificationChannel {
 
         let messageText = `${emoji} *Claude ${status}*\n`;
         messageText += `*Project:* ${this._escapeMd(notification.project)}\n`;
-        const tmuxSession = notification.tmuxSession || notification.metadata?.tmuxSession || 'unknown';
-        messageText += `*Session:* ${this._escapeMd(tmuxSession)}\n`;
+        const tmuxTarget = notification.tmuxSession || notification.metadata?.tmuxSession || 'unknown';
+        const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
+        messageText += `*Session:* ${this._escapeMd(displaySession)}\n`;
         messageText += `*Token:* \`${token}\`\n\n`;
 
         if (type === 'permission' && notification.metadata?.permissionMessage) {

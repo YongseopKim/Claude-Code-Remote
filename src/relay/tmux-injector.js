@@ -7,6 +7,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { extractSessionName } = require('../utils/tmux-utils');
 
 class TmuxInjector {
     constructor(logger, sessionName = null) {
@@ -32,10 +33,11 @@ class TmuxInjector {
         });
     }
     
-    // Check if Claude tmux session exists
+    // Check if Claude tmux session exists (has-session only accepts session name)
     async checkClaudeSession() {
+        const sessionOnly = extractSessionName(this.sessionName);
         return new Promise((resolve) => {
-            exec(`tmux has-session -t ${this.sessionName} 2>/dev/null`, (error) => {
+            exec(`tmux has-session -t ${sessionOnly} 2>/dev/null`, (error) => {
                 resolve(!error);
             });
         });
