@@ -11,6 +11,7 @@ const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
 const { extractSessionName } = require('../../utils/tmux-utils');
+const { parseQuestionReply } = require('../../utils/parse-question-reply');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -157,19 +158,33 @@ class TelegramWebhookHandler {
         }
 
         try {
-            // Inject command into tmux session (full target for precise pane targeting)
             const tmuxTarget = session.tmuxSession || 'default';
-            await this.injector.injectCommand(command, tmuxTarget);
+            const parsed = parseQuestionReply(command, session);
 
-            // Send confirmation (display session name only for readability)
+            if (parsed.type === 'twoStep') {
+                await this.injector.injectTwoStep(
+                    parsed.step1, parsed.step2, tmuxTarget
+                );
+            } else {
+                await this.injector.injectCommand(parsed.command, tmuxTarget);
+            }
+
             const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
+            const displayCmd = parsed.type === 'twoStep'
+                ? `Option ${parsed.step1} -> "${parsed.step2}"`
+                : parsed.command;
             await this._sendMessage(chatId,
-                `✅ *Command sent successfully*\n\n📝 *Command:* ${this._escapeMd(command)}\n🖥️ *Session:* ${this._escapeMd(displaySession)}\n\nClaude is now processing your request...`,
+                `✅ *Command sent successfully*\n\n` +
+                `📝 *Command:* ${this._escapeMd(displayCmd)}\n` +
+                `🖥️ *Session:* ${this._escapeMd(displaySession)}\n\n` +
+                `Claude is now processing your request...`,
                 { parse_mode: 'Markdown' });
-            
-            // Log command execution
-            this.logger.info(`Command injected - User: ${chatId}, Token: ${token}, Command: ${command}`);
-            
+
+            this.logger.info(
+                `Command injected - User: ${chatId}, Token: ${token}, ` +
+                `Command: ${command}, Type: ${parsed.type}`
+            );
+
         } catch (error) {
             this.logger.error('Command injection failed:', error.message);
             await this._sendMessage(chatId,
