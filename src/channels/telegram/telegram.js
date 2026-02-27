@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
-const { getCurrentTmuxTarget, extractSessionName } = require('../../utils/tmux-utils');
+const { getCurrentTmuxTarget } = require('../../utils/tmux-utils');
 
 class TelegramChannel extends NotificationChannel {
     constructor(config = {}) {
@@ -197,7 +197,7 @@ class TelegramChannel extends NotificationChannel {
         let messageText = `${emoji} *Claude ${status}*\n`;
         messageText += `*Project:* ${this._escapeMd(notification.project)}\n`;
         const tmuxTarget = notification.tmuxSession || notification.metadata?.tmuxSession || 'unknown';
-        const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
+        const displaySession = tmuxTarget;
         messageText += `*Session:* ${this._escapeMd(displaySession)}\n`;
         messageText += `*Token:* \`${token}\`\n\n`;
 

@@ -121,11 +121,11 @@ test('extractSessionName preserves backward compat for old-style session names',
     assert.strictEqual(sessionOnly, 'claude-real');
 });
 
-test('display session extraction for telegram messages', () => {
-    // Simulates what telegram.js _generateTelegramMessage does
+test('display session shows full pane target for telegram messages', () => {
+    // telegram.js now uses full tmuxTarget directly (no extractSessionName)
     const tmuxTarget = 'mac-dev:2.0';
-    const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
-    assert.strictEqual(displaySession, 'mac-dev');
+    const displaySession = tmuxTarget;
+    assert.strictEqual(displaySession, 'mac-dev:2.0');
 });
 
 // --- Summary ---

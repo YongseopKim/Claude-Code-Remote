@@ -10,7 +10,6 @@ const path = require('path');
 const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
-const { extractSessionName } = require('../../utils/tmux-utils');
 const { parseQuestionReply } = require('../../utils/parse-question-reply');
 
 class TelegramWebhookHandler {
@@ -171,7 +170,7 @@ class TelegramWebhookHandler {
                 await this.injector.injectCommand(parsed.command, tmuxTarget);
             }
 
-            const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
+            const displaySession = tmuxTarget;
             let displayCmd;
             if (parsed.type === 'dismiss-inject') {
                 displayCmd = parsed.answer;

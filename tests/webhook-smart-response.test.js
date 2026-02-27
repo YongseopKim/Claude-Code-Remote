@@ -244,4 +244,38 @@ describe('webhook _processCommand smart response integration', () => {
             expect.stringContaining('Type: dismiss-inject')
         );
     });
+
+    // --- Full tmux target display ---
+
+    test('success message shows full tmux target (not just session name)', async () => {
+        createSession({
+            isUserQuestion: false,
+            tmuxSession: 'mac-dev:3.1',
+        });
+
+        await handler._processCommand(chatId, token, 'hello');
+
+        expect(handler._sendMessage).toHaveBeenCalledWith(
+            chatId,
+            expect.stringContaining('mac-dev:3.1'),
+            expect.any(Object)
+        );
+    });
+
+    test('success message does not truncate pane info from target', async () => {
+        createSession({
+            isUserQuestion: false,
+            tmuxSession: 'work:2.3',
+        });
+
+        await handler._processCommand(chatId, token, 'test');
+
+        const sentMessage = handler._sendMessage.mock.calls.find(
+            call => call[1].includes('Command sent successfully')
+        );
+        expect(sentMessage).toBeTruthy();
+        expect(sentMessage[1]).toContain('work:2.3');
+        // Should NOT contain just "work" without the pane info
+        expect(sentMessage[1]).not.toMatch(/Session:\*\s+work\n/);
+    });
 });

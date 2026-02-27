@@ -94,18 +94,13 @@ function tmuxCapture(target, lines = 200) {
 
 /**
  * Get the current tmux target in "session:window.pane" format.
- * Falls back to TMUX_PANE env var when display-message fails (e.g. in hook
- * subprocesses or snap-tmux environments).
+ * Prefers TMUX_PANE env var (process-specific, accurate in hook subprocesses)
+ * over display-message (returns currently focused pane, unreliable in multi-pane).
  *
  * @returns {string|null} Full tmux target or null if not in tmux
  */
 function getCurrentTmuxTarget() {
-    // Primary: use tmux display-message
-    const target = tmuxExec(['display-message', '-p', '#S:#I.#P']);
-    if (target) return target;
-
-    // Fallback: use TMUX_PANE env var to look up the full target.
-    // TMUX_PANE is a tmux-internal ID (e.g. "%1"), not user input.
+    // Primary: TMUX_PANE (process-specific, always accurate in hook subprocesses)
     const paneId = process.env.TMUX_PANE;
     if (paneId) {
         const result = tmuxExec([
@@ -115,6 +110,10 @@ function getCurrentTmuxTarget() {
         ]);
         if (result) return result;
     }
+
+    // Fallback: display-message (when TMUX_PANE unavailable, e.g. launchd)
+    const target = tmuxExec(['display-message', '-p', '#S:#I.#P']);
+    if (target) return target;
 
     return null;
 }
