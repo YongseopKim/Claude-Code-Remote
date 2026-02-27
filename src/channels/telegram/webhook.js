@@ -170,7 +170,8 @@ class TelegramWebhookHandler {
                 await this.injector.injectCommand(parsed.command, tmuxTarget);
             }
 
-            const displaySession = tmuxTarget;
+            // Format "session:window.pane" → "session:window/pane"
+            const displaySession = tmuxTarget.replace(/\.(\d+)$/, '/$1');
             let displayCmd;
             if (parsed.type === 'dismiss-inject') {
                 displayCmd = parsed.answer;

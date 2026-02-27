@@ -257,7 +257,7 @@ describe('webhook _processCommand smart response integration', () => {
 
         expect(handler._sendMessage).toHaveBeenCalledWith(
             chatId,
-            expect.stringContaining('mac-dev:3.1'),
+            expect.stringContaining('mac-dev:3/1'),
             expect.any(Object)
         );
     });
@@ -274,7 +274,7 @@ describe('webhook _processCommand smart response integration', () => {
             call => call[1].includes('Command sent successfully')
         );
         expect(sentMessage).toBeTruthy();
-        expect(sentMessage[1]).toContain('work:2.3');
+        expect(sentMessage[1]).toContain('work:2/3');
         // Should NOT contain just "work" without the pane info
         expect(sentMessage[1]).not.toMatch(/Session:\*\s+work\n/);
     });

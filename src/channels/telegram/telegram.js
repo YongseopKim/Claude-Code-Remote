@@ -197,7 +197,8 @@ class TelegramChannel extends NotificationChannel {
         let messageText = `${emoji} *Claude ${status}*\n`;
         messageText += `*Project:* ${this._escapeMd(notification.project)}\n`;
         const tmuxTarget = notification.tmuxSession || notification.metadata?.tmuxSession || 'unknown';
-        const displaySession = tmuxTarget;
+        // Format "session:window.pane" → "session:window/pane"
+        const displaySession = tmuxTarget.replace(/\.(\d+)$/, '/$1');
         messageText += `*Session:* ${this._escapeMd(displaySession)}\n`;
         messageText += `*Token:* \`${token}\`\n\n`;
 
