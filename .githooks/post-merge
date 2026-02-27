@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # post-merge hook: git pull 후 자동으로 웹훅 서버 재시작
+# macOS (launchd) 및 Linux (systemd/nohup) 모두 지원
 
 PROJECT_DIR="$(git rev-parse --show-toplevel)"
 SCRIPT="$PROJECT_DIR/start-telegram-webhook.js"
@@ -11,7 +12,7 @@ CHANGED_FILES=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD)
 NEED_RESTART=false
 while IFS= read -r file; do
     case "$file" in
-        src/*|start-telegram-webhook.js|package.json)
+        src/*|start-telegram-webhook.js|start-all-webhooks.js|package.json)
             NEED_RESTART=true
             break
             ;;
@@ -23,16 +24,50 @@ if [ "$NEED_RESTART" = false ]; then
     exit 0
 fi
 
-# 실행 중인 웹훅 서버 찾아서 종료
-OLD_PID=$(pgrep -f "node.*start-telegram-webhook.js")
-if [ -n "$OLD_PID" ]; then
-    echo "[post-merge] 웹훅 서버 종료 중... (PID: $OLD_PID)"
-    kill "$OLD_PID" 2>/dev/null
-    sleep 1
-fi
+echo "[post-merge] 서버 관련 파일 변경 감지됨. 재시작 진행..."
 
-# 서버 재시작
-echo "[post-merge] 웹훅 서버 재시작 중..."
-nohup node "$SCRIPT" > /tmp/telegram-webhook.log 2>&1 &
-NEW_PID=$!
-echo "[post-merge] 웹훅 서버 시작됨 (PID: $NEW_PID)"
+# 플랫폼별 재시작 로직
+LAUNCHD_LABEL="com.claude-code-remote.telegram-webhook"
+SYSTEMD_SERVICE="claude-code-remote-telegram-webhook"
+
+if [ "$(uname)" = "Darwin" ]; then
+    # macOS: launchd 서비스 확인
+    if launchctl list "$LAUNCHD_LABEL" >/dev/null 2>&1; then
+        echo "[post-merge] launchd 서비스($LAUNCHD_LABEL) 감지됨."
+        OLD_PID=$(pgrep -f "node.*start-telegram-webhook.js")
+        if [ -n "$OLD_PID" ]; then
+            echo "[post-merge] 웹훅 서버 종료 중... (PID: $OLD_PID)"
+            kill "$OLD_PID" 2>/dev/null
+        fi
+        echo "[post-merge] launchd KeepAlive로 자동 재시작됩니다."
+    else
+        # launchd 미등록 시 수동 재시작
+        OLD_PID=$(pgrep -f "node.*start-telegram-webhook.js")
+        if [ -n "$OLD_PID" ]; then
+            echo "[post-merge] 웹훅 서버 종료 중... (PID: $OLD_PID)"
+            kill "$OLD_PID" 2>/dev/null
+            sleep 1
+        fi
+        echo "[post-merge] 웹훅 서버 재시작 중..."
+        nohup node "$SCRIPT" > /tmp/telegram-webhook.log 2>&1 &
+        echo "[post-merge] 웹훅 서버 시작됨 (PID: $!)"
+    fi
+else
+    # Linux: systemd 서비스 확인
+    if systemctl --user is-active "$SYSTEMD_SERVICE" >/dev/null 2>&1; then
+        echo "[post-merge] systemd 서비스($SYSTEMD_SERVICE) 감지됨. 재시작 중..."
+        systemctl --user restart "$SYSTEMD_SERVICE"
+        echo "[post-merge] systemd 서비스 재시작 완료."
+    else
+        # systemd 미등록 시 수동 재시작
+        OLD_PID=$(pgrep -f "node.*start-telegram-webhook.js")
+        if [ -n "$OLD_PID" ]; then
+            echo "[post-merge] 웹훅 서버 종료 중... (PID: $OLD_PID)"
+            kill "$OLD_PID" 2>/dev/null
+            sleep 1
+        fi
+        echo "[post-merge] 웹훅 서버 재시작 중..."
+        nohup node "$SCRIPT" > /tmp/telegram-webhook.log 2>&1 &
+        echo "[post-merge] 웹훅 서버 시작됨 (PID: $!)"
+    fi
+fi
