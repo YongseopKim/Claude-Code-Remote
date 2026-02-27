@@ -130,4 +130,91 @@ function extractSessionName(tmuxTarget) {
     return tmuxTarget.split(':')[0];
 }
 
-module.exports = { getCurrentTmuxTarget, extractSessionName, tmuxExec, tmuxCapture };
+/**
+ * Run a tmux command that produces no stdout (set-option, set-hook, etc.).
+ * Unlike tmuxExec which requires stdout to confirm success, this only checks
+ * the exit status. Prevents double-execution for side-effect-only commands.
+ *
+ * @param {string[]} args - tmux command arguments
+ * @returns {boolean} true if command succeeded
+ */
+function tmuxRun(args) {
+    try {
+        const result = spawnSync('tmux', args, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: 3000
+        });
+        if (result.status === 0) return true;
+    } catch {
+        // Fall through
+    }
+
+    // Attempt 2: bash workaround for snap-tmux on Ubuntu
+    try {
+        const escaped = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+        const result = spawnSync('bash', ['-c', `tmux ${escaped} 2>/dev/null`], {
+            encoding: 'utf8',
+            timeout: 3000
+        });
+        return result.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Extract window target from a full pane target.
+ * "mac-dev:3.1" → "mac-dev:3"
+ * "mac-dev:3"   → "mac-dev:3"
+ * "mac-dev"     → "mac-dev"
+ * @param {string} tmuxTarget - Full target (session:window.pane)
+ * @returns {string} Window-level target (session:window)
+ */
+function extractWindowTarget(tmuxTarget) {
+    if (!tmuxTarget) return '';
+    return tmuxTarget.replace(/\.\d+$/, '');
+}
+
+/**
+ * Set window alert (blinking red) to signal that user input is needed.
+ * Sets both window-status-style (visible from other windows) and
+ * window-status-current-style (visible in the current window).
+ * Registers pane-focus-in hooks so the alert auto-clears when the user
+ * switches to any pane (covers both window switching and pane switching).
+ *
+ * @param {string} tmuxTarget - Full target (session:window.pane)
+ * @returns {boolean} true if alert was set
+ */
+function setWindowAlert(tmuxTarget) {
+    const windowTarget = extractWindowTarget(tmuxTarget);
+    if (!windowTarget) return false;
+
+    tmuxRun(['set-window-option', '-t', windowTarget, 'window-status-style', 'bg=red,blink']);
+    tmuxRun(['set-window-option', '-t', windowTarget, 'window-status-current-style', 'bg=red,blink']);
+    // Auto-clear hooks: pane-focus-in fires on both window and pane switching.
+    // Two indices to clear both styles independently.
+    tmuxRun(['set-hook', '-g', 'pane-focus-in[98]', 'set-window-option -u window-status-style']);
+    tmuxRun(['set-hook', '-g', 'pane-focus-in[99]', 'set-window-option -u window-status-current-style']);
+    return true;
+}
+
+/**
+ * Clear window alert, restoring default status style.
+ *
+ * @param {string} tmuxTarget - Full target (session:window.pane)
+ * @returns {boolean} true if alert was cleared
+ */
+function clearWindowAlert(tmuxTarget) {
+    const windowTarget = extractWindowTarget(tmuxTarget);
+    if (!windowTarget) return false;
+
+    tmuxRun(['set-window-option', '-t', windowTarget, '-u', 'window-status-style']);
+    tmuxRun(['set-window-option', '-t', windowTarget, '-u', 'window-status-current-style']);
+    return true;
+}
+
+module.exports = {
+    getCurrentTmuxTarget, extractSessionName, tmuxExec, tmuxCapture,
+    tmuxRun, extractWindowTarget, setWindowAlert, clearWindowAlert
+};

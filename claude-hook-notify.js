@@ -175,6 +175,14 @@ async function sendHookNotification() {
             }
         }
         
+        // Set/clear tmux window alert based on notification type
+        const { setWindowAlert, clearWindowAlert } = require('./src/utils/tmux-utils');
+        if (notificationType === 'permission' || notificationType === 'waiting') {
+            setWindowAlert(tmuxSession);
+        } else if (notificationType === 'completed') {
+            clearWindowAlert(tmuxSession);
+        }
+
         // Report overall results
         const successful = results.filter(r => r.success).length;
         const total = results.length;

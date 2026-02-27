@@ -170,6 +170,10 @@ class TelegramWebhookHandler {
                 await this.injector.injectCommand(parsed.command, tmuxTarget);
             }
 
+            // Clear tmux window alert since user has responded
+            const { clearWindowAlert } = require('../../utils/tmux-utils');
+            clearWindowAlert(tmuxTarget);
+
             // Format "session:window.pane" → "session:window/pane"
             const displaySession = tmuxTarget.replace(/\.(\d+)$/, '/$1');
             let displayCmd;
