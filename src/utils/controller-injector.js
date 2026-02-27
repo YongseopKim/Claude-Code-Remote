@@ -120,6 +120,36 @@ class ControllerInjector {
         }
     }
 
+    async dismissAndInject(answer, sessionName = null, delayMs = 500) {
+        const session = sessionName || this.defaultSession;
+
+        if (this.mode !== 'tmux') {
+            return this._injectPty(answer, session);
+        }
+
+        const tmux = this._getTmuxCommand();
+        const sessionOnly = extractSessionName(session);
+        try {
+            execSync(`${tmux} has-session -t ${sessionOnly}`, { stdio: 'ignore' });
+        } catch (error) {
+            throw new Error(`Tmux session '${sessionOnly}' not found`);
+        }
+
+        // Step A: Dismiss AskUserQuestion TUI with Escape
+        execSync(`${tmux} send-keys -t ${session} Escape`, { stdio: 'ignore' });
+
+        // Wait for TUI to close and prompt to appear
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+
+        // Step B: Inject answer text
+        const escaped = answer.replace(/'/g, "'\\''");
+        execSync(`${tmux} send-keys -t ${session} '${escaped}'`, { stdio: 'ignore' });
+        execSync(`${tmux} send-keys -t ${session} Enter`, { stdio: 'ignore' });
+
+        this.logger.info(`Dismiss+inject to tmux '${session}': ${answer}`);
+        return true;
+    }
+
     async injectTwoStep(step1, step2, sessionName = null, delayMs = 500) {
         const session = sessionName || this.defaultSession;
 

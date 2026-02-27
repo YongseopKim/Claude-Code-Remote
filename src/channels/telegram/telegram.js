@@ -202,22 +202,43 @@ class TelegramChannel extends NotificationChannel {
         messageText += `*Token:* \`${token}\`\n\n`;
 
         if (type === 'permission' && notification.metadata?.isUserQuestion) {
-            const escaped = this._escapeMd(notification.metadata.permissionMessage);
-            messageText += `📝 *Question:*\n${escaped}\n\n`;
+            const allQuestions = notification.metadata.allQuestions || [];
 
-            const options = notification.metadata.approvalOptions;
-            if (options && options.length > 0) {
-                for (let i = 0; i < options.length; i++) {
-                    const prefix = i === 0 ? '▸' : ' ';
-                    messageText += `${prefix} ${i + 1}\\. ${this._escapeMd(options[i])}\n`;
+            if (allQuestions.length > 1) {
+                // Multi-question: show all questions
+                for (let qi = 0; qi < allQuestions.length; qi++) {
+                    const q = allQuestions[qi];
+                    messageText += `📝 *Q${qi + 1}: ${this._escapeMd(q.question)}*\n`;
+                    if (q.options && q.options.length > 0) {
+                        for (let oi = 0; oi < q.options.length; oi++) {
+                            const opt = q.options[oi];
+                            let text = opt.label;
+                            if (opt.description) text += ` - ${opt.description}`;
+                            messageText += `  ${oi + 1}\\. ${this._escapeMd(text)}\n`;
+                        }
+                    }
+                    messageText += `\n`;
                 }
-                messageText += `\n`;
-            }
+                messageText += `💬 *Reply to the first question (번호 or 텍스트)*`;
+            } else {
+                // Single question: original format
+                const escaped = this._escapeMd(notification.metadata.permissionMessage);
+                messageText += `📝 *Question:*\n${escaped}\n\n`;
 
-            const optionNums = options.map((_, i) => i + 1).join(', ');
-            const typeOptNum = (notification.metadata.questionOptionCount || 0) + 1;
-            messageText += `💬 *Reply with ${optionNums} to respond*\n`;
-            messageText += `Custom: \`${typeOptNum}. your text here\``;
+                const options = notification.metadata.approvalOptions;
+                if (options && options.length > 0) {
+                    for (let i = 0; i < options.length; i++) {
+                        const prefix = i === 0 ? '▸' : ' ';
+                        messageText += `${prefix} ${i + 1}\\. ${this._escapeMd(options[i])}\n`;
+                    }
+                    messageText += `\n`;
+                }
+
+                const optionNums = options.map((_, i) => i + 1).join(', ');
+                const typeOptNum = (notification.metadata.questionOptionCount || 0) + 1;
+                messageText += `💬 *Reply with ${optionNums} to respond*\n`;
+                messageText += `Custom: \`${typeOptNum}. your text here\``;
+            }
         } else if (type === 'permission' && notification.metadata?.permissionMessage) {
             const escaped = this._escapeMd(notification.metadata.permissionMessage);
             messageText += `⚠️ *Permission Request:*\n${escaped}\n\n`;
@@ -277,7 +298,9 @@ class TelegramChannel extends NotificationChannel {
             project: notification.project,
             notification: notification,
             isUserQuestion: notification.metadata?.isUserQuestion || false,
-            questionOptionCount: notification.metadata?.questionOptionCount || 0
+            questionOptionCount: notification.metadata?.questionOptionCount || 0,
+            questionOptions: notification.metadata?.questionOptions || [],
+            allQuestions: notification.metadata?.allQuestions || []
         };
 
         const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);

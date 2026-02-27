@@ -161,7 +161,9 @@ class TelegramWebhookHandler {
             const tmuxTarget = session.tmuxSession || 'default';
             const parsed = parseQuestionReply(command, session);
 
-            if (parsed.type === 'twoStep') {
+            if (parsed.type === 'dismiss-inject') {
+                await this.injector.dismissAndInject(parsed.answer, tmuxTarget);
+            } else if (parsed.type === 'twoStep') {
                 await this.injector.injectTwoStep(
                     parsed.step1, parsed.step2, tmuxTarget
                 );
@@ -170,9 +172,14 @@ class TelegramWebhookHandler {
             }
 
             const displaySession = extractSessionName(tmuxTarget) || tmuxTarget;
-            const displayCmd = parsed.type === 'twoStep'
-                ? `Option ${parsed.step1} -> "${parsed.step2}"`
-                : parsed.command;
+            let displayCmd;
+            if (parsed.type === 'dismiss-inject') {
+                displayCmd = parsed.answer;
+            } else if (parsed.type === 'twoStep') {
+                displayCmd = `Option ${parsed.step1} -> "${parsed.step2}"`;
+            } else {
+                displayCmd = parsed.command;
+            }
             await this._sendMessage(chatId,
                 `✅ *Command sent successfully*\n\n` +
                 `📝 *Command:* ${this._escapeMd(displayCmd)}\n` +
