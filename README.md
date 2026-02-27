@@ -93,7 +93,15 @@ cd Claude-Code-Remote
 npm install
 ```
 
-### 3. Interactive Setup (Recommended)
+### 3. Enable Git Hooks
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This enables the shared git hooks (e.g., auto-restart webhook server on `git pull` when server-related files change).
+
+### 4. Interactive Setup (Recommended)
 
 ```bash
 npm run setup
@@ -104,7 +112,7 @@ npm run setup
 - 可随时重跑更新密钥/切换渠道
 - 如需手动配置或离线编辑 `.env`，见下方“手动配置”
 
-### 4. 手动配置（可选，跳过如果已运行 `npm run setup`）
+### 5. 手动配置（可选，跳过如果已运行 `npm run setup`）
 
 #### Option A: Configure Email (Recommended for Beginners)
 
@@ -215,7 +223,7 @@ export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
 
 > **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
 
-### 5. 启动 Claude（按你的注入模式选择）
+### 6. 启动 Claude（按你的注入模式选择）
 
 - **默认 PTY 模式（无需 tmux）**：直接在终端运行 `claude-code --config /path/to/your/claude/settings.json`
 - **如果你选择 tmux 模式**：
@@ -228,7 +236,7 @@ export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
 
 > **Note**: Interactive setup 已合并 hooks 到 `~/.claude/settings.json`。若跳过，请确保手动配置 hooks。
 
-### 6. Start Services
+### 7. Start Services
 
 #### For All Platforms (Recommended)
 ```bash
@@ -261,7 +269,7 @@ npm run line
 node start-line-webhook.js
 ```
 
-### 7. Test Your Setup
+### 8. Test Your Setup
 
 **Quick Test:**
 ```bash

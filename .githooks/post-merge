@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# post-merge hook: git pull 후 자동으로 웹훅 서버 재시작
+
+PROJECT_DIR="$(git rev-parse --show-toplevel)"
+SCRIPT="$PROJECT_DIR/start-telegram-webhook.js"
+
+# 변경된 파일 중 서버 관련 파일이 있는지 확인
+CHANGED_FILES=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD)
+
+NEED_RESTART=false
+while IFS= read -r file; do
+    case "$file" in
+        src/*|start-telegram-webhook.js|package.json)
+            NEED_RESTART=true
+            break
+            ;;
+    esac
+done <<< "$CHANGED_FILES"
+
+if [ "$NEED_RESTART" = false ]; then
+    echo "[post-merge] 서버 관련 파일 변경 없음. 재시작 건너뜀."
+    exit 0
+fi
+
+# 실행 중인 웹훅 서버 찾아서 종료
+OLD_PID=$(pgrep -f "node.*start-telegram-webhook.js")
+if [ -n "$OLD_PID" ]; then
+    echo "[post-merge] 웹훅 서버 종료 중... (PID: $OLD_PID)"
+    kill "$OLD_PID" 2>/dev/null
+    sleep 1
+fi
+
+# 서버 재시작
+echo "[post-merge] 웹훅 서버 재시작 중..."
+nohup node "$SCRIPT" > /tmp/telegram-webhook.log 2>&1 &
+NEW_PID=$!
+echo "[post-merge] 웹훅 서버 시작됨 (PID: $NEW_PID)"
