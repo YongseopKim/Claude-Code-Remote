@@ -35,6 +35,7 @@ if (fs.existsSync(envPath)) {
 const TelegramChannel = require('./src/channels/telegram/telegram');
 const DesktopChannel = require('./src/channels/local/desktop');
 const EmailChannel = require('./src/channels/email/smtp');
+const { buildPermissionData } = require('./src/utils/build-permission-data');
 
 async function readStdin() {
     return new Promise((resolve) => {
@@ -135,62 +136,19 @@ async function sendHookNotification() {
         };
         // For permission type, build a detailed permission description
         if (notificationType === 'permission') {
-            let permissionMessage = hookData.message || 'Permission required';
-
-            // If hook provides tool_name and tool_input (from PermissionRequest hook),
-            // build a detailed description including the actual command/arguments
-            if (hookData.tool_name) {
-                const toolName = hookData.tool_name;
-                const toolInput = hookData.tool_input || {};
-                let detail = '';
-
-                if (toolName === 'Bash' && toolInput.command) {
-                    detail = toolInput.command;
-                } else if (toolName === 'Edit' && toolInput.file_path) {
-                    detail = `File: ${toolInput.file_path}`;
-                } else if (toolName === 'Write' && toolInput.file_path) {
-                    detail = `File: ${toolInput.file_path}`;
-                } else if (toolName === 'Read' && toolInput.file_path) {
-                    detail = `File: ${toolInput.file_path}`;
-                } else if (toolInput.command || toolInput.file_path || toolInput.url) {
-                    detail = toolInput.command || toolInput.file_path || toolInput.url;
-                } else {
-                    // Fallback: show first meaningful value from tool_input
-                    const vals = Object.values(toolInput).filter(v => typeof v === 'string' && v.length > 0);
-                    if (vals.length > 0) detail = vals[0];
-                }
-
-                permissionMessage = `Permission to use ${toolName}`;
-                if (detail) {
-                    // Truncate long commands for readability
-                    if (detail.length > 300) detail = detail.substring(0, 297) + '...';
-                    permissionMessage += `\n\n${detail}`;
-                }
-            }
-
-            // Build approval options from permission_suggestions
-            // CLI shows one "don't ask again" option per suggestion (not per rule),
-            // so we must match that to keep reply numbers aligned with CLI numbering.
-            const approvalOptions = ['Yes'];
-            if (hookData.permission_suggestions && Array.isArray(hookData.permission_suggestions)) {
-                for (const suggestion of hookData.permission_suggestions) {
-                    if (suggestion.type === 'addRules' && Array.isArray(suggestion.rules)) {
-                        const parts = suggestion.rules
-                            .filter(r => r.toolName && r.ruleContent)
-                            .map(r => `${r.toolName}(${r.ruleContent}:*)`);
-                        if (parts.length > 0) {
-                            approvalOptions.push(`Yes, and don't ask again for: ${parts.join(', ')}`);
-                        }
-                    }
-                }
-            }
-            approvalOptions.push('No');
+            const permData = buildPermissionData(hookData);
 
             notification.metadata = {
-                permissionMessage: permissionMessage,
-                approvalOptions: approvalOptions,
-                tmuxSession: tmuxSession
+                permissionMessage: permData.permissionMessage,
+                approvalOptions: permData.approvalOptions,
+                tmuxSession: tmuxSession,
             };
+
+            // AskUserQuestion-specific fields
+            if (permData.isUserQuestion) {
+                notification.metadata.isUserQuestion = true;
+                notification.metadata.questionOptionCount = permData.questionOptionCount;
+            }
         }
         // For completed/waiting, don't set metadata - let TelegramChannel extract from tmux
         
