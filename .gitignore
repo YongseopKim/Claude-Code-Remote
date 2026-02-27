@@ -45,6 +45,9 @@ coverage/
 dist/
 build/
 
+# Design/plan documents (generated per session)
+docs/plans/
+
 # Temporary files
 tmp/
 temp/
