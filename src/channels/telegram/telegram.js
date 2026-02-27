@@ -48,7 +48,10 @@ class TelegramChannel extends NotificationChannel {
     _getNetworkOptions() {
         const options = {};
         if (this.config.forceIPv4) {
-            options.family = 4;
+            const http = require('http');
+            const https = require('https');
+            options.httpAgent = new http.Agent({ family: 4 });
+            options.httpsAgent = new https.Agent({ family: 4 });
         }
         return options;
     }
@@ -121,6 +124,12 @@ class TelegramChannel extends NotificationChannel {
             };
         }
         
+        // Ensure tmuxSession is in metadata for session record
+        if (notification.tmuxSession && !notification.metadata?.tmuxSession) {
+            if (!notification.metadata) notification.metadata = {};
+            notification.metadata.tmuxSession = notification.tmuxSession;
+        }
+
         // Create session record
         await this._createSession(sessionId, notification, token);
 
@@ -162,6 +171,11 @@ class TelegramChannel extends NotificationChannel {
                 this._getNetworkOptions()
             );
 
+            // Save Telegram message_id to session for reply-based commands
+            if (response.data.ok && response.data.result.message_id) {
+                await this._updateSessionMessageId(sessionId, response.data.result.message_id);
+            }
+
             this.logger.info(`Telegram message sent successfully, Session: ${sessionId}`);
             return true;
         } catch (error) {
@@ -172,36 +186,53 @@ class TelegramChannel extends NotificationChannel {
         }
     }
 
+    _escapeMd(text) {
+        // Escape Telegram Markdown special characters: _ * ` [
+        return text.replace(/([_*`\[])/g, '\\$1');
+    }
+
     _generateTelegramMessage(notification, sessionId, token) {
         const type = notification.type;
-        const emoji = type === 'completed' ? '✅' : '⏳';
-        const status = type === 'completed' ? 'Completed' : 'Waiting for Input';
-        
-        let messageText = `${emoji} *Claude Task ${status}*\n`;
-        messageText += `*Project:* ${notification.project}\n`;
-        messageText += `*Session Token:* \`${token}\`\n\n`;
-        
-        if (notification.metadata) {
+        const emojiMap = { completed: '✅', waiting: '⏳', permission: '🔐' };
+        const statusMap = { completed: 'Completed', waiting: 'Waiting for Input', permission: 'Permission Required' };
+        const emoji = emojiMap[type] || '📢';
+        const status = statusMap[type] || type;
+
+        let messageText = `${emoji} *Claude ${status}*\n`;
+        messageText += `*Project:* ${this._escapeMd(notification.project)}\n`;
+        const tmuxSession = notification.tmuxSession || notification.metadata?.tmuxSession || 'unknown';
+        messageText += `*Session:* ${this._escapeMd(tmuxSession)}\n`;
+        messageText += `*Token:* \`${token}\`\n\n`;
+
+        if (type === 'permission' && notification.metadata?.permissionMessage) {
+            const escaped = this._escapeMd(notification.metadata.permissionMessage);
+            messageText += `⚠️ *Permission Request:*\n${escaped}\n\n`;
+            messageText += `💬 *Reply to this message to respond*\n`;
+            messageText += `Or type: \`/cmd ${token} y\``;
+        } else if (notification.metadata) {
+            const maxTotal = 3800;
+
             if (notification.metadata.userQuestion) {
-                messageText += `📝 *Your Question:*\n${notification.metadata.userQuestion.substring(0, 200)}`;
-                if (notification.metadata.userQuestion.length > 200) {
-                    messageText += '...';
-                }
-                messageText += '\n\n';
+                const escaped = this._escapeMd(notification.metadata.userQuestion);
+                messageText += `📝 *Your Question:*\n${escaped}\n\n`;
             }
-            
+
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 *Claude Response:*\n${notification.metadata.claudeResponse.substring(0, 300)}`;
-                if (notification.metadata.claudeResponse.length > 300) {
-                    messageText += '...';
-                }
-                messageText += '\n\n';
+                const remaining = maxTotal - messageText.length - 200;
+                const response = notification.metadata.claudeResponse;
+                const trimmed = remaining > 0 && response.length > remaining
+                    ? response.substring(0, remaining) + '...'
+                    : response;
+                const escaped = this._escapeMd(trimmed);
+                messageText += `🤖 *Claude Response:*\n${escaped}\n\n`;
             }
+
+            messageText += `💬 *Reply to this message or type:*\n`;
+            messageText += `\`/cmd ${token} <your command>\``;
+        } else {
+            messageText += `💬 *Reply to this message or type:*\n`;
+            messageText += `\`/cmd ${token} <your command>\``;
         }
-        
-        messageText += `💬 *To send a new command:*\n`;
-        messageText += `Reply with: \`/cmd ${token} <your command>\`\n`;
-        messageText += `Example: \`/cmd ${token} Please analyze this code\``;
 
         return messageText;
     }
@@ -224,6 +255,20 @@ class TelegramChannel extends NotificationChannel {
         fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
         
         this.logger.debug(`Session created: ${sessionId}`);
+    }
+
+    async _updateSessionMessageId(sessionId, messageId) {
+        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
+        try {
+            if (fs.existsSync(sessionFile)) {
+                const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+                session.telegramMessageId = messageId;
+                fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+                this.logger.debug(`Session ${sessionId} updated with message_id: ${messageId}`);
+            }
+        } catch (error) {
+            this.logger.error(`Failed to update session message_id:`, error.message);
+        }
     }
 
     async _removeSession(sessionId) {

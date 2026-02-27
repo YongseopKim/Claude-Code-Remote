@@ -13,6 +13,8 @@ class ControllerInjector {
         this.logger = new Logger('ControllerInjector');
         this.mode = config.mode || process.env.INJECTION_MODE || 'pty';
         this.defaultSession = config.defaultSession || process.env.TMUX_SESSION || 'claude-code';
+        this._tmuxBinaryCache = null;
+        this._tmuxSocketCache = null;
     }
 
     async injectCommand(command, sessionName = null) {
@@ -25,22 +27,88 @@ class ControllerInjector {
         }
     }
 
+    _findTmuxBinary() {
+        if (this._tmuxBinaryCache) return this._tmuxBinaryCache;
+
+        // Try 'which tmux' first
+        try {
+            const result = execSync('which tmux', {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore']
+            }).trim();
+            if (result) {
+                this._tmuxBinaryCache = result;
+                return this._tmuxBinaryCache;
+            }
+        } catch {}
+
+        // Fall back to common paths across platforms
+        const candidates = [
+            '/opt/homebrew/bin/tmux',   // macOS ARM (Homebrew)
+            '/usr/local/bin/tmux',      // macOS Intel / custom install
+            '/usr/bin/tmux',            // Linux (apt, yum, etc.)
+            '/snap/bin/tmux',           // Ubuntu Snap
+        ];
+
+        for (const p of candidates) {
+            if (fs.existsSync(p)) {
+                this._tmuxBinaryCache = p;
+                return this._tmuxBinaryCache;
+            }
+        }
+
+        this._tmuxBinaryCache = 'tmux';
+        return this._tmuxBinaryCache;
+    }
+
+    _findTmuxSocket() {
+        if (this._tmuxSocketCache) return this._tmuxSocketCache;
+
+        const uid = process.getuid ? process.getuid() : (parseInt(process.env.UID) || 1000);
+
+        // /tmp/tmux-{uid}/default works on both macOS and Linux
+        // On macOS, /tmp is a symlink to /private/tmp
+        const candidates = [
+            `/tmp/tmux-${uid}/default`,
+            `/private/tmp/tmux-${uid}/default`,
+        ];
+
+        for (const p of candidates) {
+            if (fs.existsSync(p)) {
+                this._tmuxSocketCache = p;
+                return this._tmuxSocketCache;
+            }
+        }
+
+        // Default to standard path
+        this._tmuxSocketCache = `/tmp/tmux-${uid}/default`;
+        return this._tmuxSocketCache;
+    }
+
+    _getTmuxCommand() {
+        const binary = this._findTmuxBinary();
+        const socket = this._findTmuxSocket();
+        return `${binary} -S ${socket}`;
+    }
+
     _injectTmux(command, sessionName) {
+        const tmux = this._getTmuxCommand();
+
         try {
             // Check if tmux session exists
             try {
-                execSync(`tmux has-session -t ${sessionName}`, { stdio: 'ignore' });
+                execSync(`${tmux} has-session -t ${sessionName}`, { stdio: 'ignore' });
             } catch (error) {
                 throw new Error(`Tmux session '${sessionName}' not found`);
             }
 
             // Send command to tmux session and execute it
             const escapedCommand = command.replace(/'/g, "'\\''");
-            
+
             // Send command first
-            execSync(`tmux send-keys -t ${sessionName} '${escapedCommand}'`);
+            execSync(`${tmux} send-keys -t ${sessionName} '${escapedCommand}'`, { stdio: 'ignore' });
             // Then send Enter as separate command
-            execSync(`tmux send-keys -t ${sessionName} Enter`);
+            execSync(`${tmux} send-keys -t ${sessionName} Enter`, { stdio: 'ignore' });
             
             this.logger.info(`Command injected to tmux session '${sessionName}'`);
             return true;
@@ -81,7 +149,8 @@ class ControllerInjector {
     listSessions() {
         if (this.mode === 'tmux') {
             try {
-                const output = execSync('tmux list-sessions -F "#{session_name}"', { 
+                const tmux = this._getTmuxCommand();
+                const output = execSync(`${tmux} list-sessions -F "#{session_name}"`, {
                     encoding: 'utf8',
                     stdio: ['ignore', 'pipe', 'ignore']
                 });

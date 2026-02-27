@@ -26,7 +26,8 @@ const config = {
     groupId: process.env.TELEGRAM_GROUP_ID,
     whitelist: process.env.TELEGRAM_WHITELIST ? process.env.TELEGRAM_WHITELIST.split(',').map(id => id.trim()) : [],
     port: process.env.TELEGRAM_WEBHOOK_PORT || 3001,
-    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL
+    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL,
+    forceIPv4: process.env.TELEGRAM_FORCE_IPV4 === 'true'
 };
 
 // Validate configuration

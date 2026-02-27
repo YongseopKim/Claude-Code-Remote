@@ -25,6 +25,10 @@ class TelegramWebhookHandler {
         this._setupRoutes();
     }
 
+    _escapeMd(text) {
+        return text.replace(/([_*`\[])/g, '\\$1');
+    }
+
     _setupMiddleware() {
         // Parse JSON for all requests
         this.app.use(express.json());
@@ -47,7 +51,10 @@ class TelegramWebhookHandler {
     _getNetworkOptions() {
         const options = {};
         if (this.config.forceIPv4) {
-            options.family = 4;
+            const http = require('http');
+            const https = require('https');
+            options.httpAgent = new http.Agent({ family: 4 });
+            options.httpsAgent = new https.Agent({ family: 4 });
         }
         return options;
     }
@@ -74,7 +81,7 @@ class TelegramWebhookHandler {
         const chatId = message.chat.id;
         const userId = message.from.id;
         const messageText = message.text?.trim();
-        
+
         if (!messageText) return;
 
         // Check if user is authorized
@@ -96,6 +103,18 @@ class TelegramWebhookHandler {
             return;
         }
 
+        // Handle reply to notification message (reply-based command)
+        if (message.reply_to_message) {
+            const originalMessageId = message.reply_to_message.message_id;
+            const session = await this._findSessionByMessageId(originalMessageId);
+            if (session) {
+                this.logger.info(`Reply-based command from message_id: ${originalMessageId}, token: ${session.token}`);
+                await this._processCommand(chatId, session.token, messageText);
+                return;
+            }
+            // If no session found for the reply, fall through to normal parsing
+        }
+
         // Parse command
         const commandMatch = messageText.match(/^\/cmd\s+([A-Z0-9]{8})\s+(.+)$/i);
         if (!commandMatch) {
@@ -104,8 +123,8 @@ class TelegramWebhookHandler {
             if (directMatch) {
                 await this._processCommand(chatId, directMatch[1], directMatch[2]);
             } else {
-                await this._sendMessage(chatId, 
-                    '❌ Invalid format. Use:\n`/cmd <TOKEN> <command>`\n\nExample:\n`/cmd ABC12345 analyze this code`',
+                await this._sendMessage(chatId,
+                    '❌ Invalid format. Use:\n• Reply to a notification message\n• `/cmd <TOKEN> <command>`\n\nExample:\n`/cmd ABC12345 analyze this code`',
                     { parse_mode: 'Markdown' });
             }
             return;
@@ -142,8 +161,8 @@ class TelegramWebhookHandler {
             await this.injector.injectCommand(command, tmuxSession);
             
             // Send confirmation
-            await this._sendMessage(chatId, 
-                `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nClaude is now processing your request...`,
+            await this._sendMessage(chatId,
+                `✅ *Command sent successfully*\n\n📝 *Command:* ${this._escapeMd(command)}\n🖥️ *Session:* ${this._escapeMd(tmuxSession)}\n\nClaude is now processing your request...`,
                 { parse_mode: 'Markdown' });
             
             // Log command execution
@@ -151,8 +170,8 @@ class TelegramWebhookHandler {
             
         } catch (error) {
             this.logger.error('Command injection failed:', error.message);
-            await this._sendMessage(chatId, 
-                `❌ *Command execution failed:* ${error.message}`,
+            await this._sendMessage(chatId,
+                `❌ *Command execution failed:* ${this._escapeMd(error.message)}`,
                 { parse_mode: 'Markdown' });
         }
     }
@@ -201,10 +220,12 @@ class TelegramWebhookHandler {
             `*Commands:*\n` +
             `• \`/start\` - Welcome message\n` +
             `• \`/help\` - Show this help\n` +
-            `• \`/cmd <TOKEN> <command>\` - Send command to Claude\n\n` +
+            `• \`/cmd <TOKEN> <command>\` - Send command to Claude\n` +
+            `• *Reply* to a notification message to send command\n\n` +
             `*Example:*\n` +
             `\`/cmd ABC12345 analyze the performance of this function\`\n\n` +
             `*Tips:*\n` +
+            `• Reply to any notification to send a command directly\n` +
             `• Tokens are case-insensitive\n` +
             `• Tokens expire after 24 hours\n` +
             `• You can also just type \`TOKEN command\` without /cmd`;
@@ -254,6 +275,27 @@ class TelegramWebhookHandler {
         return this.config.botUsername || 'claude_remote_bot';
     }
 
+    async _findSessionByMessageId(messageId) {
+        try {
+            const files = fs.readdirSync(this.sessionsDir);
+            for (const file of files) {
+                if (!file.endsWith('.json')) continue;
+                const sessionPath = path.join(this.sessionsDir, file);
+                try {
+                    const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+                    if (session.telegramMessageId === messageId) {
+                        return session;
+                    }
+                } catch (error) {
+                    this.logger.error(`Failed to read session file ${file}:`, error.message);
+                }
+            }
+        } catch (error) {
+            this.logger.error('Failed to search sessions by message_id:', error.message);
+        }
+        return null;
+    }
+
     async _findSessionByToken(token) {
         const files = fs.readdirSync(this.sessionsDir);
         
@@ -294,7 +336,8 @@ class TelegramWebhookHandler {
                 this._getNetworkOptions()
             );
         } catch (error) {
-            this.logger.error('Failed to send message:', error.response?.data || error.message);
+            const detail = error.response?.data ? JSON.stringify(error.response.data) : error.message || String(error);
+            this.logger.error('Failed to send message:', detail);
         }
     }
 

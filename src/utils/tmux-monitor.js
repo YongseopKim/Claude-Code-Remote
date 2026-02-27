@@ -348,6 +348,9 @@ class TmuxMonitor extends EventEmitter {
             }
         }
         
+        // Clean terminal UI chrome from response
+        claudeResponse = this._cleanResponseContent(claudeResponse);
+
         return {
             userQuestion: userQuestion || 'Recent command',
             claudeResponse: claudeResponse || 'Task completed',
@@ -670,14 +673,15 @@ class TmuxMonitor extends EventEmitter {
 
         // Join response lines and clean up
         claudeResponse = responseLines.join('\n').trim();
-        
+
         // Remove box characters but preserve formatting
         claudeResponse = claudeResponse
             .replace(/[╭╰│]/g, '')
             .replace(/^\s*│\s*/gm, '')
-            // Don't collapse multiple spaces - preserve code formatting
-            // .replace(/\s+/g, ' ')
             .trim();
+
+        // Clean up terminal UI chrome from the response
+        claudeResponse = this._cleanResponseContent(claudeResponse);
 
         // Don't limit response length - we want the full response
         // if (claudeResponse.length > 500) {
@@ -699,6 +703,89 @@ class TmuxMonitor extends EventEmitter {
             userQuestion: userQuestion || 'No user input',
             claudeResponse: claudeResponse || 'No Claude response'
         };
+    }
+
+    /**
+     * Clean terminal UI chrome from Claude response content
+     * Removes spinner text, status bars, separator lines, ANSI codes, etc.
+     * @param {string} text - Raw response text from tmux buffer
+     * @returns {string} - Cleaned response text
+     */
+    _cleanResponseContent(text) {
+        if (!text) return text;
+
+        const lines = text.split('\n');
+        const cleanedLines = [];
+
+        // Patterns for lines to remove entirely
+        const removePatterns = [
+            // ANSI escape codes (strip from each line, not remove the line)
+            // Spinner / loading text (Claude Code animated spinners)
+            /^(Canoodling|Pondering|Thinking|Processing|Analyzing|Searching|Reading|Writing|Editing|Working|Loading|Generating|Compiling|Building|Running|Installing|Fetching|Downloading|Uploading|Connecting|Waiting|Checking|Validating|Verifying|Formatting|Parsing|Resolving|Updating|Scanning|Indexing|Evaluating|Computing|Calculating|Optimizing|Configuring|Initializing|Preparing|Assembling|Collecting|Gathering|Examining|Inspecting|Reviewing|Assessing|Measuring|Monitoring|Observing|Tracking|Recording|Logging)\.{2,}\s*$/i,
+            // Status bar / mode indicators
+            /^(accept|reject)\s+(edits?\s+on|all)\s*/i,
+            /^\s*\?\s+for shortcuts\s*$/i,
+            // Separator lines (all dashes, box-drawing characters)
+            /^[─━═╌╍┈┉]+\s*$/,
+            /^[\s─━═╌╍┈┉╭╮╰╯│┃┌┐└┘├┤┬┴┼]+\s*$/,
+            // Empty box rows
+            /^─+\s*$/,
+            // Tool execution markers
+            /^\s*⏺\s*(Read|Edit|Write|Bash|Glob|Grep|Task|WebFetch|WebSearch)\s*$/,
+            // Progress indicators
+            /^\s*\[\d+\/\d+\]\s*$/,
+            /^\s*\d+%\s*$/,
+            // Cursor/prompt artifacts
+            /^\s*>\s*$/,
+            /^\s*\$\s*$/,
+            // Tab/window markers from tmux
+            /^\s*\[\d+\]\s*$/,
+        ];
+
+        for (const line of lines) {
+            // Strip ANSI escape codes
+            let cleaned = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+            // Strip other control characters
+            cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+            // Check if line matches any removal pattern
+            const shouldRemove = removePatterns.some(pattern => pattern.test(cleaned.trim()));
+            if (shouldRemove) {
+                continue;
+            }
+
+            // Skip lines that are only whitespace or box-drawing characters
+            if (/^[\s╭╮╰╯│┃─━═┌┐└┘├┤┬┴┼]*$/.test(cleaned)) {
+                continue;
+            }
+
+            cleanedLines.push(cleaned);
+        }
+
+        // Remove leading/trailing empty lines
+        while (cleanedLines.length > 0 && cleanedLines[0].trim() === '') {
+            cleanedLines.shift();
+        }
+        while (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1].trim() === '') {
+            cleanedLines.pop();
+        }
+
+        // Collapse 3+ consecutive empty lines into 2
+        const result = [];
+        let emptyCount = 0;
+        for (const line of cleanedLines) {
+            if (line.trim() === '') {
+                emptyCount++;
+                if (emptyCount <= 2) {
+                    result.push(line);
+                }
+            } else {
+                emptyCount = 0;
+                result.push(line);
+            }
+        }
+
+        return result.join('\n').trim();
     }
 
     /**

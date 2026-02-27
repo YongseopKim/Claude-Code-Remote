@@ -36,12 +36,33 @@ const TelegramChannel = require('./src/channels/telegram/telegram');
 const DesktopChannel = require('./src/channels/local/desktop');
 const EmailChannel = require('./src/channels/email/smtp');
 
+async function readStdin() {
+    return new Promise((resolve) => {
+        let data = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('readable', () => {
+            let chunk;
+            while ((chunk = process.stdin.read()) !== null) {
+                data += chunk;
+            }
+        });
+        process.stdin.on('end', () => {
+            try { resolve(JSON.parse(data)); }
+            catch { resolve({}); }
+        });
+        setTimeout(() => resolve({}), 2000);
+    });
+}
+
 async function sendHookNotification() {
     try {
         console.log('🔔 Claude Hook: Sending notifications...');
-        
+
         // Get notification type from command line argument
         const notificationType = process.argv[2] || 'completed';
+
+        // Read hook data from stdin (Claude Code passes JSON)
+        const hookData = await readStdin();
         
         const channels = [];
         const results = [];
@@ -58,7 +79,8 @@ async function sendHookNotification() {
             const telegramConfig = {
                 botToken: process.env.TELEGRAM_BOT_TOKEN,
                 chatId: process.env.TELEGRAM_CHAT_ID,
-                groupId: process.env.TELEGRAM_GROUP_ID
+                groupId: process.env.TELEGRAM_GROUP_ID,
+                forceIPv4: process.env.TELEGRAM_FORCE_IPV4 === 'true'
             };
             
             if (telegramConfig.botToken && (telegramConfig.chatId || telegramConfig.groupId)) {
@@ -109,14 +131,28 @@ async function sendHookNotification() {
             // Not in tmux or tmux not available, use default
         }
         
-        // Create notification
+        // Create notification based on type
+        const titleMap = {
+            completed: 'Task Completed',
+            waiting: 'Waiting for Input',
+            permission: 'Permission Required'
+        };
         const notification = {
             type: notificationType,
-            title: `Claude ${notificationType === 'completed' ? 'Task Completed' : 'Waiting for Input'}`,
-            message: `Claude has ${notificationType === 'completed' ? 'completed a task' : 'is waiting for input'}`,
-            project: projectName
-            // Don't set metadata here - let TelegramChannel extract real conversation content
+            title: `Claude ${titleMap[notificationType] || notificationType}`,
+            message: hookData.message || `Claude ${titleMap[notificationType] || 'notification'}`,
+            project: projectName,
+            tmuxSession: tmuxSession
         };
+        // For permission type, attach the hook message directly as metadata
+        // so TelegramChannel doesn't try to scrape tmux for it
+        if (notificationType === 'permission' && hookData.message) {
+            notification.metadata = {
+                permissionMessage: hookData.message,
+                tmuxSession: tmuxSession
+            };
+        }
+        // For completed/waiting, don't set metadata - let TelegramChannel extract from tmux
         
         console.log(`📱 Sending ${notificationType} notification for project: ${projectName}`);
         console.log(`🖥️ Tmux session: ${tmuxSession}`);
@@ -161,7 +197,7 @@ async function sendHookNotification() {
 
 // Show usage if no arguments
 if (process.argv.length < 2) {
-    console.log('Usage: node claude-hook-notify.js [completed|waiting]');
+    console.log('Usage: node claude-hook-notify.js [completed|waiting|permission]');
     process.exit(1);
 }
 
