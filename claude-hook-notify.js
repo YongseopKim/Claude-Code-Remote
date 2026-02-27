@@ -148,6 +148,8 @@ async function sendHookNotification() {
             if (permData.isUserQuestion) {
                 notification.metadata.isUserQuestion = true;
                 notification.metadata.questionOptionCount = permData.questionOptionCount;
+                notification.metadata.questionOptions = permData.questionOptions || [];
+                notification.metadata.allQuestions = permData.allQuestions || [];
             }
         }
         // For completed/waiting, don't set metadata - let TelegramChannel extract from tmux
