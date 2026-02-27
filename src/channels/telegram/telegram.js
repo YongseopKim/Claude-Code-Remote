@@ -275,7 +275,9 @@ class TelegramChannel extends NotificationChannel {
             expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             tmuxSession: notification.metadata?.tmuxSession || 'default',
             project: notification.project,
-            notification: notification
+            notification: notification,
+            isUserQuestion: notification.metadata?.isUserQuestion || false,
+            questionOptionCount: notification.metadata?.questionOptionCount || 0
         };
 
         const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
