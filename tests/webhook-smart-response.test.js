@@ -1,6 +1,6 @@
 /**
  * Tests for webhook _processCommand smart response integration
- * Verifies that parseQuestionReply is used to determine single vs two-step injection
+ * Verifies dismiss-inject for AskUserQuestion, and twoStep/single for legacy/non-question
  */
 const path = require('path');
 const fs = require('fs');
@@ -14,11 +14,11 @@ jest.mock('express', () => {
 });
 jest.mock('axios');
 
-// We need to mock ControllerInjector to spy on injectCommand and injectTwoStep
 jest.mock('../src/utils/controller-injector', () => {
     return jest.fn().mockImplementation(() => ({
         injectCommand: jest.fn().mockResolvedValue(undefined),
         injectTwoStep: jest.fn().mockResolvedValue(undefined),
+        dismissAndInject: jest.fn().mockResolvedValue(undefined),
     }));
 });
 
@@ -32,17 +32,14 @@ describe('webhook _processCommand smart response integration', () => {
 
     beforeEach(() => {
         handler = new TelegramWebhookHandler({ botToken: 'test-token' });
-        // Mock _sendMessage to avoid actual API calls
         handler._sendMessage = jest.fn().mockResolvedValue(undefined);
 
-        // Ensure sessions dir exists
         if (!fs.existsSync(handler.sessionsDir)) {
             fs.mkdirSync(handler.sessionsDir, { recursive: true });
         }
     });
 
     afterEach(() => {
-        // Clean up session files created during tests
         const sessionFiles = fs.readdirSync(handler.sessionsDir)
             .filter(f => f.startsWith('test-'));
         for (const file of sessionFiles) {
@@ -65,6 +62,8 @@ describe('webhook _processCommand smart response integration', () => {
         return session;
     }
 
+    // --- Non-question sessions (unchanged) ---
+
     test('non-question session uses injectCommand with original command', async () => {
         createSession({ isUserQuestion: false });
 
@@ -74,18 +73,73 @@ describe('webhook _processCommand smart response integration', () => {
             'analyze this code',
             'mysession:0.0'
         );
+        expect(handler.injector.dismissAndInject).not.toHaveBeenCalled();
+    });
+
+    // --- Question sessions with questionOptions (dismiss-inject) ---
+
+    test('question session with questionOptions uses dismissAndInject', async () => {
+        createSession({
+            isUserQuestion: true,
+            questionOptionCount: 3,
+            questionOptions: [
+                { label: 'Python' },
+                { label: 'JavaScript' },
+                { label: 'TypeScript' },
+            ],
+        });
+
+        await handler._processCommand(chatId, token, '2');
+
+        expect(handler.injector.dismissAndInject).toHaveBeenCalledWith(
+            'JavaScript', 'mysession:0.0'
+        );
+        expect(handler.injector.injectCommand).not.toHaveBeenCalled();
         expect(handler.injector.injectTwoStep).not.toHaveBeenCalled();
-        expect(handler._sendMessage).toHaveBeenCalledWith(
-            chatId,
-            expect.stringContaining('Command sent successfully'),
-            expect.any(Object)
+    });
+
+    test('question session custom text uses dismissAndInject', async () => {
+        createSession({
+            isUserQuestion: true,
+            questionOptionCount: 3,
+            questionOptions: [
+                { label: 'Python' },
+                { label: 'JavaScript' },
+                { label: 'TypeScript' },
+            ],
+        });
+
+        await handler._processCommand(chatId, token, '4. I prefer Rust');
+
+        expect(handler.injector.dismissAndInject).toHaveBeenCalledWith(
+            'I prefer Rust', 'mysession:0.0'
         );
     });
 
-    test('question session with "N. text" matching typeOption uses injectTwoStep', async () => {
+    test('question session free text uses dismissAndInject', async () => {
         createSession({
             isUserQuestion: true,
-            questionOptionCount: 3, // typeOption = 4
+            questionOptionCount: 3,
+            questionOptions: [
+                { label: 'Python' },
+                { label: 'JavaScript' },
+                { label: 'TypeScript' },
+            ],
+        });
+
+        await handler._processCommand(chatId, token, 'just use whatever');
+
+        expect(handler.injector.dismissAndInject).toHaveBeenCalledWith(
+            'just use whatever', 'mysession:0.0'
+        );
+    });
+
+    // --- Legacy question sessions (no questionOptions, backward compat) ---
+
+    test('legacy question session with "N. text" matching typeOption uses injectTwoStep', async () => {
+        createSession({
+            isUserQuestion: true,
+            questionOptionCount: 3,
         });
 
         await handler._processCommand(chatId, token, '4. custom request here');
@@ -95,21 +149,9 @@ describe('webhook _processCommand smart response integration', () => {
             'custom request here',
             'mysession:0.0'
         );
-        expect(handler.injector.injectCommand).not.toHaveBeenCalled();
-        // Confirmation message should show the two-step info
-        expect(handler._sendMessage).toHaveBeenCalledWith(
-            chatId,
-            expect.stringContaining('Option 4'),
-            expect.any(Object)
-        );
-        expect(handler._sendMessage).toHaveBeenCalledWith(
-            chatId,
-            expect.stringContaining('custom request here'),
-            expect.any(Object)
-        );
     });
 
-    test('question session with plain number uses injectCommand', async () => {
+    test('legacy question session with plain number uses injectCommand', async () => {
         createSession({
             isUserQuestion: true,
             questionOptionCount: 3,
@@ -121,24 +163,9 @@ describe('webhook _processCommand smart response integration', () => {
             '2',
             'mysession:0.0'
         );
-        expect(handler.injector.injectTwoStep).not.toHaveBeenCalled();
     });
 
-    test('question session with "N. text" where N != typeOption uses injectCommand with number only', async () => {
-        createSession({
-            isUserQuestion: true,
-            questionOptionCount: 3, // typeOption = 4
-        });
-
-        await handler._processCommand(chatId, token, '2. some text');
-
-        // parseQuestionReply returns { type: 'single', command: '2' } for non-matching N
-        expect(handler.injector.injectCommand).toHaveBeenCalledWith(
-            '2',
-            'mysession:0.0'
-        );
-        expect(handler.injector.injectTwoStep).not.toHaveBeenCalled();
-    });
+    // --- Error cases ---
 
     test('expired session returns error message', async () => {
         createSession({ expiresAt: Math.floor(Date.now() / 1000) - 100 });
@@ -154,7 +181,6 @@ describe('webhook _processCommand smart response integration', () => {
     });
 
     test('invalid token returns error message', async () => {
-        // No session created
         await handler._processCommand(chatId, 'INVALID1', 'hello');
 
         expect(handler.injector.injectCommand).not.toHaveBeenCalled();
@@ -180,18 +206,42 @@ describe('webhook _processCommand smart response integration', () => {
         );
     });
 
-    test('log message includes parsed type', async () => {
+    test('dismissAndInject failure sends error message', async () => {
+        createSession({
+            isUserQuestion: true,
+            questionOptionCount: 2,
+            questionOptions: [{ label: 'A' }, { label: 'B' }],
+        });
+        handler.injector.dismissAndInject.mockRejectedValueOnce(
+            new Error('tmux session not found')
+        );
+
+        await handler._processCommand(chatId, token, '1');
+
+        expect(handler._sendMessage).toHaveBeenCalledWith(
+            chatId,
+            expect.stringContaining('Command execution failed'),
+            expect.any(Object)
+        );
+    });
+
+    test('log message includes parsed type for dismiss-inject', async () => {
         createSession({
             isUserQuestion: true,
             questionOptionCount: 3,
+            questionOptions: [
+                { label: 'Python' },
+                { label: 'JavaScript' },
+                { label: 'TypeScript' },
+            ],
         });
 
         const logSpy = jest.spyOn(handler.logger, 'info');
 
-        await handler._processCommand(chatId, token, '4. hello world');
+        await handler._processCommand(chatId, token, '2');
 
         expect(logSpy).toHaveBeenCalledWith(
-            expect.stringContaining('Type: twoStep')
+            expect.stringContaining('Type: dismiss-inject')
         );
     });
 });

@@ -90,6 +90,59 @@ describe('buildPermissionData', () => {
             expect(result.isUserQuestion).toBe(true);
             expect(result.permissionMessage).toBe('Question from Claude');
         });
+
+        test('includes questionOptions with label and description', () => {
+            const result = buildPermissionData(hookData);
+            expect(result.questionOptions).toEqual([
+                { label: 'Option A', description: 'First approach' },
+                { label: 'Option B', description: 'Second approach' },
+                { label: 'Option C', description: 'Third approach' },
+            ]);
+        });
+
+        test('questionOptions handles options without description', () => {
+            const data = {
+                tool_name: 'AskUserQuestion',
+                tool_input: {
+                    questions: [{
+                        question: 'Pick one',
+                        options: [{ label: 'Yes' }, { label: 'No' }],
+                    }]
+                },
+            };
+            const result = buildPermissionData(data);
+            expect(result.questionOptions).toEqual([
+                { label: 'Yes', description: '' },
+                { label: 'No', description: '' },
+            ]);
+        });
+
+        test('includes allQuestions for multi-question support', () => {
+            const data = {
+                tool_name: 'AskUserQuestion',
+                tool_input: {
+                    questions: [
+                        { question: 'Q1?', options: [{ label: 'A' }, { label: 'B' }] },
+                        { question: 'Q2?', options: [{ label: 'X' }, { label: 'Y' }] },
+                    ],
+                },
+            };
+            const result = buildPermissionData(data);
+            expect(result.allQuestions).toHaveLength(2);
+            expect(result.allQuestions[0].question).toBe('Q1?');
+            expect(result.allQuestions[0].options).toEqual([{ label: 'A' }, { label: 'B' }]);
+            expect(result.allQuestions[1].question).toBe('Q2?');
+        });
+
+        test('empty questions array gives empty questionOptions and allQuestions', () => {
+            const data = {
+                tool_name: 'AskUserQuestion',
+                tool_input: { questions: [] },
+            };
+            const result = buildPermissionData(data);
+            expect(result.questionOptions).toEqual([]);
+            expect(result.allQuestions).toEqual([]);
+        });
     });
 
     describe('regular tool handling', () => {

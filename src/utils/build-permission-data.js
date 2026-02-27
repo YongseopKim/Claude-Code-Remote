@@ -19,6 +19,7 @@ function _buildAskUserQuestionData(hookData) {
     let permissionMessage = 'Question from Claude';
     const approvalOptions = [];
     let questionOptionCount = 0;
+    const questionOptions = [];
 
     if (q) {
         permissionMessage = q.question || 'Question from Claude';
@@ -28,6 +29,7 @@ function _buildAskUserQuestionData(hookData) {
                 let text = opt.label;
                 if (opt.description) text += ` - ${opt.description}`;
                 approvalOptions.push(text);
+                questionOptions.push({ label: opt.label, description: opt.description || '' });
             }
             questionOptionCount = q.options.length;
         }
@@ -36,11 +38,18 @@ function _buildAskUserQuestionData(hookData) {
     approvalOptions.push('Type something');
     approvalOptions.push('Chat about this');
 
+    const allQuestions = questions.map(q => ({
+        question: q.question || '',
+        options: q.options || [],
+    }));
+
     return {
         permissionMessage,
         approvalOptions,
         isUserQuestion: true,
         questionOptionCount,
+        questionOptions,
+        allQuestions,
     };
 }
 
