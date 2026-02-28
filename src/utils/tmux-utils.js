@@ -180,8 +180,11 @@ function extractWindowTarget(tmuxTarget) {
  * Set window alert (blinking red) to signal that user input is needed.
  * Sets both window-status-style (visible from other windows) and
  * window-status-current-style (visible in the current window).
- * Registers pane-focus-in hooks so the alert auto-clears when the user
- * switches to any pane (covers both window switching and pane switching).
+ * Registers session-window-changed hooks so the alert auto-clears when
+ * the user switches TO the alert window.
+ *
+ * Note: pane-focus-in hooks don't fire on Ubuntu snap tmux, so we use
+ * session-window-changed with if-shell to check the target window index.
  *
  * @param {string} tmuxTarget - Full target (session:window.pane)
  * @returns {boolean} true if alert was set
@@ -192,10 +195,16 @@ function setWindowAlert(tmuxTarget) {
 
     tmuxRun(['set-window-option', '-t', windowTarget, 'window-status-style', 'bg=red,blink']);
     tmuxRun(['set-window-option', '-t', windowTarget, 'window-status-current-style', 'bg=red,blink']);
-    // Auto-clear hooks: pane-focus-in fires on both window and pane switching.
-    // Two indices to clear both styles independently.
-    tmuxRun(['set-hook', '-g', 'pane-focus-in[98]', 'set-window-option -u window-status-style']);
-    tmuxRun(['set-hook', '-g', 'pane-focus-in[99]', 'set-window-option -u window-status-current-style']);
+
+    // Auto-clear: session-window-changed fires when user switches windows.
+    // if-shell -F checks if user switched TO the alert window, then clears.
+    const windowIndex = windowTarget.includes(':') ? windowTarget.split(':')[1] : '';
+    if (windowIndex) {
+        tmuxRun(['set-hook', '-g', 'session-window-changed[98]',
+            `if-shell -F "#{==:#{window_index},${windowIndex}}" "set-window-option -u window-status-style"`]);
+        tmuxRun(['set-hook', '-g', 'session-window-changed[99]',
+            `if-shell -F "#{==:#{window_index},${windowIndex}}" "set-window-option -u window-status-current-style"`]);
+    }
     return true;
 }
 
@@ -211,6 +220,9 @@ function clearWindowAlert(tmuxTarget) {
 
     tmuxRun(['set-window-option', '-t', windowTarget, '-u', 'window-status-style']);
     tmuxRun(['set-window-option', '-t', windowTarget, '-u', 'window-status-current-style']);
+    // Clean up auto-clear hooks
+    tmuxRun(['set-hook', '-ug', 'session-window-changed[98]']);
+    tmuxRun(['set-hook', '-ug', 'session-window-changed[99]']);
     return true;
 }
 

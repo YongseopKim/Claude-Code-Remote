@@ -245,7 +245,7 @@ describe('setWindowAlert()', () => {
         );
     });
 
-    test('pane-focus-in auto-clear hook을 두 개 등록한다', () => {
+    test('session-window-changed auto-clear hook을 두 개 등록한다', () => {
         const { spawnSync, mod } = requireFresh();
         spawnSync.mockReturnValue({ status: 0 });
 
@@ -256,11 +256,14 @@ describe('setWindowAlert()', () => {
         );
         expect(hookCalls.length).toBeGreaterThanOrEqual(2);
         expect(hookCalls[0][1]).toEqual(
-            expect.arrayContaining(['-g', 'pane-focus-in[98]'])
+            expect.arrayContaining(['-g', 'session-window-changed[98]'])
         );
         expect(hookCalls[1][1]).toEqual(
-            expect.arrayContaining(['-g', 'pane-focus-in[99]'])
+            expect.arrayContaining(['-g', 'session-window-changed[99]'])
         );
+        // if-shell로 window index 3을 체크하는지 확인
+        expect(hookCalls[0][1][3]).toContain('#{==:#{window_index},3}');
+        expect(hookCalls[1][1][3]).toContain('#{==:#{window_index},3}');
     });
 
     test('빈 target이면 false를 반환한다', () => {
@@ -287,6 +290,24 @@ describe('clearWindowAlert()', () => {
         );
         expect(setCalls[1][1]).toEqual(
             expect.arrayContaining(['-t', 'mac-dev:3', '-u', 'window-status-current-style'])
+        );
+    });
+
+    test('session-window-changed auto-clear hook도 정리한다', () => {
+        const { spawnSync, mod } = requireFresh();
+        spawnSync.mockReturnValue({ status: 0 });
+
+        mod.clearWindowAlert('mac-dev:3.1');
+
+        const hookCalls = spawnSync.mock.calls.filter(
+            ([cmd, args]) => cmd === 'tmux' && args[0] === 'set-hook'
+        );
+        expect(hookCalls.length).toBeGreaterThanOrEqual(2);
+        expect(hookCalls[0][1]).toEqual(
+            expect.arrayContaining(['-ug', 'session-window-changed[98]'])
+        );
+        expect(hookCalls[1][1]).toEqual(
+            expect.arrayContaining(['-ug', 'session-window-changed[99]'])
         );
     });
 
