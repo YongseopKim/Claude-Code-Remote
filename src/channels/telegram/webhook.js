@@ -106,14 +106,24 @@ class TelegramWebhookHandler {
 
         // Handle reply to notification message (reply-based command)
         if (message.reply_to_message) {
-            const originalMessageId = message.reply_to_message.message_id;
-            const session = await this._findSessionByMessageId(originalMessageId);
-            if (session) {
-                this.logger.info(`Reply-based command from message_id: ${originalMessageId}, token: ${session.token}`);
-                await this._processCommand(chatId, session.token, messageText);
+            // 1st priority: extract token from reply_to_message text
+            const originalText = message.reply_to_message.text || '';
+            const tokenMatch = originalText.match(/Token:\s*`?([A-Z0-9]{8})`?/i);
+            if (tokenMatch) {
+                const extractedToken = tokenMatch[1].toUpperCase();
+                this.logger.info(`Token extracted from reply text: ${extractedToken}`);
+                await this._processCommand(chatId, extractedToken, messageText);
                 return;
             }
-            // If no session found for the reply, fall through to normal parsing
+
+            // 2nd priority: fallback to most recent unexpired session
+            const fallback = await this._findMostRecentSession();
+            if (fallback) {
+                this.logger.info(`Reply fallback to most recent session, token: ${fallback.token} (no token in reply text)`);
+                await this._processCommand(chatId, fallback.token, messageText);
+                return;
+            }
+            // If no session found at all, fall through to normal parsing
         }
 
         // Parse command
@@ -124,9 +134,16 @@ class TelegramWebhookHandler {
             if (directMatch) {
                 await this._processCommand(chatId, directMatch[1], directMatch[2]);
             } else {
-                await this._sendMessage(chatId,
-                    '❌ Invalid format. Use:\n• Reply to a notification message\n• `/cmd <TOKEN> <command>`\n\nExample:\n`/cmd ABC12345 analyze this code`',
-                    { parse_mode: 'Markdown' });
+                // Bare input (number, short text) - try most recent session
+                const fallback = await this._findMostRecentSession();
+                if (fallback) {
+                    this.logger.info(`Bare input fallback to most recent session, token: ${fallback.token}`);
+                    await this._processCommand(chatId, fallback.token, messageText);
+                } else {
+                    await this._sendMessage(chatId,
+                        '❌ Invalid format. Use:\n• Reply to a notification message\n• `/cmd <TOKEN> <command>`\n\nExample:\n`/cmd ABC12345 analyze this code`',
+                        { parse_mode: 'Markdown' });
+                }
             }
             return;
         }
@@ -320,6 +337,32 @@ class TelegramWebhookHandler {
             }
         } catch (error) {
             this.logger.error('Failed to search sessions by message_id:', error.message);
+        }
+        return null;
+    }
+
+    async _findMostRecentSession() {
+        try {
+            const files = fs.readdirSync(this.sessionsDir);
+            const now = Math.floor(Date.now() / 1000);
+            let mostRecent = null;
+
+            for (const file of files) {
+                if (!file.endsWith('.json')) continue;
+                const sessionPath = path.join(this.sessionsDir, file);
+                try {
+                    const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+                    if (session.expiresAt && session.expiresAt < now) continue;
+                    if (!mostRecent || (session.createdAt || 0) > (mostRecent.createdAt || 0)) {
+                        mostRecent = session;
+                    }
+                } catch (error) {
+                    this.logger.error(`Failed to read session file ${file}:`, error.message);
+                }
+            }
+            return mostRecent;
+        } catch (error) {
+            this.logger.error('Failed to find most recent session:', error.message);
         }
         return null;
     }
