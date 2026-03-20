@@ -105,9 +105,10 @@ function _buildToolPermissionData(hookData) {
                 }
             }
         }
-    } else if (hookData.tool_name) {
-        // Fallback: Claude Code may not pass permission_suggestions in hookData.
-        // Construct "don't ask again" option from tool_name to match terminal UI.
+    }
+    // Fallback: if no "don't ask again" option was generated from suggestions,
+    // construct one from tool_name to always match terminal's 3-option UI.
+    if (approvalOptions.length === 1 && hookData.tool_name) {
         const displayName = getToolDisplayName(hookData.tool_name);
         approvalOptions.push(`Yes, and don't ask again for ${displayName}`);
     }

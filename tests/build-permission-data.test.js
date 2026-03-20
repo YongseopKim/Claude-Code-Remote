@@ -264,5 +264,51 @@ describe('buildPermissionData', () => {
             const result = buildPermissionData(data);
             expect(result.approvalOptions).toEqual(['Yes', 'No']);
         });
+
+        test('fallback when suggestions exist but type is not addRules', () => {
+            const data = {
+                tool_name: 'Edit',
+                tool_input: { file_path: '/src/index.js' },
+                permission_suggestions: [{
+                    type: 'allowSession',
+                    behavior: 'allow',
+                    destination: 'session'
+                }]
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toHaveLength(3);
+            expect(result.approvalOptions[1]).toContain("don't ask again");
+            expect(result.approvalOptions[1]).toContain('Edit File');
+        });
+
+        test('fallback when suggestions have addRules but rules array is empty', () => {
+            const data = {
+                tool_name: 'Write',
+                tool_input: { file_path: '/src/out.js' },
+                permission_suggestions: [{
+                    type: 'addRules',
+                    rules: []
+                }]
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toHaveLength(3);
+            expect(result.approvalOptions[1]).toContain("don't ask again");
+            expect(result.approvalOptions[1]).toContain('Write File');
+        });
+
+        test('fallback when rules lack toolName or ruleContent', () => {
+            const data = {
+                tool_name: 'Bash',
+                tool_input: { command: 'ls' },
+                permission_suggestions: [{
+                    type: 'addRules',
+                    rules: [{ toolName: 'Bash' }]
+                }]
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toHaveLength(3);
+            expect(result.approvalOptions[1]).toContain("don't ask again");
+            expect(result.approvalOptions[1]).toContain('Run Command');
+        });
     });
 });
