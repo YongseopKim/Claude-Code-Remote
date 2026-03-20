@@ -228,5 +228,41 @@ describe('buildPermissionData', () => {
             const result = buildPermissionData(data);
             expect(result.permissionMessage).toBe('Custom permission message');
         });
+
+        test('generates fallback "don\'t ask again" when permission_suggestions missing', () => {
+            const data = {
+                tool_name: 'mcp__plugin_playwright_playwright__browser_navigate',
+                tool_input: { url: 'http://localhost:8080' }
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toHaveLength(3);
+            expect(result.approvalOptions[0]).toBe('Yes');
+            expect(result.approvalOptions[1]).toContain("don't ask again");
+            expect(result.approvalOptions[1]).toContain('Playwright: browser navigate');
+            expect(result.approvalOptions[2]).toBe('No');
+        });
+
+        test('generates fallback "don\'t ask again" when permission_suggestions is empty array', () => {
+            const data = {
+                tool_name: 'Bash',
+                tool_input: { command: 'npm test' },
+                permission_suggestions: []
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toHaveLength(3);
+            expect(result.approvalOptions[0]).toBe('Yes');
+            expect(result.approvalOptions[1]).toContain("don't ask again");
+            expect(result.approvalOptions[1]).toContain('Run Command');
+            expect(result.approvalOptions[2]).toBe('No');
+        });
+
+        test('no fallback when no tool_name and no suggestions', () => {
+            const data = {
+                message: 'Some permission',
+                permission_suggestions: []
+            };
+            const result = buildPermissionData(data);
+            expect(result.approvalOptions).toEqual(['Yes', 'No']);
+        });
     });
 });

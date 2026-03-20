@@ -92,7 +92,7 @@ function _buildToolPermissionData(hookData) {
 
     const approvalOptions = ['Yes'];
     const suggestions = hookData.permission_suggestions;
-    if (suggestions && Array.isArray(suggestions)) {
+    if (suggestions && Array.isArray(suggestions) && suggestions.length > 0) {
         for (const suggestion of suggestions) {
             if (suggestion.type === 'addRules' && Array.isArray(suggestion.rules)) {
                 const parts = suggestion.rules
@@ -105,6 +105,11 @@ function _buildToolPermissionData(hookData) {
                 }
             }
         }
+    } else if (hookData.tool_name) {
+        // Fallback: Claude Code may not pass permission_suggestions in hookData.
+        // Construct "don't ask again" option from tool_name to match terminal UI.
+        const displayName = getToolDisplayName(hookData.tool_name);
+        approvalOptions.push(`Yes, and don't ask again for ${displayName}`);
     }
     approvalOptions.push('No');
 
